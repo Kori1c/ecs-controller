@@ -115,6 +115,7 @@ class AliyunTrafficCheck
             'threshold_action' => $settings['threshold_action'] ?? 'stop_and_notify',
             'keep_alive' => ($settings['keep_alive'] ?? '0') === '1',
             'api_interval' => (int) ($settings['api_interval'] ?? 600),
+            'enable_billing' => ($settings['enable_billing'] ?? '0') === '1',
             'Notification' => [
                 'email_enabled' => ($settings['notify_email_enabled'] ?? '1') === '1',
                 'email' => $settings['notify_email'] ?? '',
@@ -446,9 +447,11 @@ class AliyunTrafficCheck
         $data = [];
         $threshold = (int) $this->configManager->get('traffic_threshold', 95);
         $userInterval = (int) $this->configManager->get('api_interval', 600);
+        $billingEnabled = $this->configManager->get('enable_billing', '0') === '1';
 
         $currentTime = time();
         $accounts = $this->configManager->getAccounts();
+        $billingCycle = date('Y-m');
 
         foreach ($accounts as $account) {
             $lastUpdate = $account['updated_at'] ?? 0;
@@ -489,7 +492,7 @@ class AliyunTrafficCheck
             $usagePercent = ($account['max_traffic'] > 0) ? round(($traffic / $account['max_traffic']) * 100, 2) : 0;
             $isFull = $usagePercent >= $threshold;
 
-            $data[] = [
+            $item = [
                 'id' => $account['id'],
                 'account' => substr($account['access_key_id'], 0, 7) . '***',
                 'flow_total' => (float) $account['max_traffic'],
@@ -503,6 +506,13 @@ class AliyunTrafficCheck
                 'lastUpdated' => date('Y-m-d H:i:s', $lastUpdate > 0 ? $lastUpdate : $currentTime),
                 'remark' => $account['remark'] ?? ''
             ];
+
+            // 注入费用数据 (如果启用)
+            if ($billingEnabled) {
+                $item['cost'] = $this->safeGetBillingInfo($account, $billingCycle);
+            }
+
+            $data[] = $item;
         }
 
         return [
@@ -641,6 +651,71 @@ class AliyunTrafficCheck
             'ap-northeast-1' => '日本(东京)',
         ];
         return $regions[$regionId] ?? $regionId;
+    }
+
+    // ==================== 费用分析 ====================
+
+    /**
+     * 安全获取账户费用摘要信息 (带缓存)
+     * 用于实例卡片上显示
+     */
+    private function safeGetBillingInfo($account, $billingCycle)
+    {
+        $costInfo = [
+            'enabled' => true,
+            'monthly_cost' => null,
+            'balance' => null,
+            'currency' => 'CNY',
+            'last_updated' => null,
+            'error' => null
+        ];
+
+        // 1. 尝试读取余额缓存
+        $balanceCache = $this->db->getBillingCache($account['id'], 'balance', '', 21600);
+        if ($balanceCache) {
+            $costInfo['balance'] = $balanceCache['AvailableAmount'];
+            $costInfo['currency'] = $balanceCache['Currency'] ?? 'CNY';
+        } else {
+            try {
+                $balance = $this->aliyunService->getAccountBalance(
+                    $account['access_key_id'],
+                    $account['access_key_secret']
+                );
+                $costInfo['balance'] = $balance['AvailableAmount'];
+                $costInfo['currency'] = $balance['Currency'] ?? 'CNY';
+                $this->db->setBillingCache($account['id'], 'balance', '', $balance);
+            } catch (\Exception $e) {
+                $costInfo['error'] = '余额查询失败';
+            }
+        }
+
+        // 2. 尝试读取实例账单缓存
+        if (!empty($account['instance_id'])) {
+            $billCache = $this->db->getBillingCache($account['id'], 'instance_bill', $billingCycle, 21600);
+            if ($billCache) {
+                $costInfo['monthly_cost'] = $billCache['TotalCost'];
+            } else {
+                try {
+                    $bill = $this->aliyunService->getInstanceBill(
+                        $account['access_key_id'],
+                        $account['access_key_secret'],
+                        $account['instance_id'],
+                        $billingCycle
+                    );
+                    $costInfo['monthly_cost'] = $bill['TotalCost'];
+                    $this->db->setBillingCache($account['id'], 'instance_bill', $billingCycle, $bill);
+                } catch (\Exception $e) {
+                    if ($costInfo['error']) {
+                        $costInfo['error'] = 'BSS权限不足';
+                    } else {
+                        $costInfo['error'] = '账单查询失败';
+                    }
+                }
+            }
+        }
+
+        $costInfo['last_updated'] = date('Y-m-d H:i:s');
+        return $costInfo;
     }
 
     public function renderTemplate()

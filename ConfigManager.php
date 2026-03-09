@@ -86,6 +86,7 @@ class ConfigManager
             $this->saveSetting('threshold_action', $data['threshold_action']);
             $this->saveSetting('keep_alive', isset($data['keep_alive']) && $data['keep_alive'] ? '1' : '0');
             $this->saveSetting('api_interval', $data['api_interval'] ?? 600);
+            $this->saveSetting('enable_billing', isset($data['enable_billing']) && $data['enable_billing'] ? '1' : '0');
 
             if (isset($data['Notification'])) {
                 // Email

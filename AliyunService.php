@@ -226,4 +226,168 @@ class AliyunService
             return true;
         }, 'controlInstance');
     }
+
+    // ==================== BSS 费用中心 API ====================
+
+    private $balanceCache = [];
+
+    /**
+     * 查询账户可用余额
+     * @param string $key AccessKey
+     * @param string $secret Secret
+     * @return array ['AvailableAmount' => '...', 'Currency' => 'CNY']
+     * @throws \Exception
+     */
+    public function getAccountBalance($key, $secret)
+    {
+        $cacheKey = md5($key);
+        if (isset($this->balanceCache[$cacheKey])) {
+            return $this->balanceCache[$cacheKey];
+        }
+
+        $result = $this->executeWithRetry(function () use ($key, $secret) {
+            AlibabaCloud::accessKeyClient($key, $secret)
+                ->regionId('cn-hangzhou')
+                ->asDefaultClient();
+
+            return AlibabaCloud::rpc()
+                ->product('BssOpenApi')
+                ->scheme('https')
+                ->version('2017-12-14')
+                ->action('QueryAccountBalance')
+                ->method('POST')
+                ->host('business.aliyuncs.com')
+                ->options([
+                    'connect_timeout' => 5.0,
+                    'timeout' => 10.0
+                ])
+                ->request();
+        }, 'getAccountBalance');
+
+        $data = [
+            'AvailableAmount' => $result['Data']['AvailableAmount'] ?? '0',
+            'Currency' => $result['Data']['Currency'] ?? 'CNY'
+        ];
+
+        $this->balanceCache[$cacheKey] = $data;
+        return $data;
+    }
+
+    /**
+     * 查询指定实例的当月账单明细
+     * @param string $key AccessKey
+     * @param string $secret Secret
+     * @param string $instanceId 实例ID
+     * @param string $billingCycle 账期 (格式: 2026-03)
+     * @return array ['TotalCost' => float, 'Items' => [...]]
+     * @throws \Exception
+     */
+    public function getInstanceBill($key, $secret, $instanceId, $billingCycle)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $instanceId, $billingCycle) {
+            AlibabaCloud::accessKeyClient($key, $secret)
+                ->regionId('cn-hangzhou')
+                ->asDefaultClient();
+
+            return AlibabaCloud::rpc()
+                ->product('BssOpenApi')
+                ->scheme('https')
+                ->version('2017-12-14')
+                ->action('DescribeInstanceBill')
+                ->method('POST')
+                ->host('business.aliyuncs.com')
+                ->options([
+                    'query' => [
+                        'BillingCycle' => $billingCycle,
+                        'InstanceID' => $instanceId,
+                        'Granularity' => 'MONTHLY'
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'getInstanceBill');
+
+        $items = $result['Data']['Items'] ?? [];
+        $totalCost = 0;
+        $details = [];
+
+        foreach ($items as $item) {
+            $cost = (float) ($item['PretaxAmount'] ?? 0);
+            $totalCost += $cost;
+            $details[] = [
+                'ProductName' => $item['ProductName'] ?? '',
+                'ProductCode' => $item['ProductCode'] ?? '',
+                'BillingType' => $item['BillingType'] ?? '',
+                'PretaxAmount' => $cost,
+                'DeductedByCashCoupons' => (float) ($item['DeductedByCashCoupons'] ?? 0),
+                'DeductedByPrepaidCard' => (float) ($item['DeductedByPrepaidCard'] ?? 0),
+                'PaymentAmount' => (float) ($item['PaymentAmount'] ?? 0),
+            ];
+        }
+
+        return [
+            'TotalCost' => round($totalCost, 2),
+            'Items' => $details
+        ];
+    }
+
+    /**
+     * 查询账单总览 (按产品分类的月度费用)
+     * @param string $key AccessKey
+     * @param string $secret Secret
+     * @param string $billingCycle 账期 (格式: 2026-03)
+     * @return array ['TotalCost' => float, 'Products' => [...]]
+     * @throws \Exception
+     */
+    public function getBillOverview($key, $secret, $billingCycle)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $billingCycle) {
+            AlibabaCloud::accessKeyClient($key, $secret)
+                ->regionId('cn-hangzhou')
+                ->asDefaultClient();
+
+            return AlibabaCloud::rpc()
+                ->product('BssOpenApi')
+                ->scheme('https')
+                ->version('2017-12-14')
+                ->action('QueryBillOverview')
+                ->method('POST')
+                ->host('business.aliyuncs.com')
+                ->options([
+                    'query' => [
+                        'BillingCycle' => $billingCycle
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'getBillOverview');
+
+        $items = $result['Data']['Items']['Item'] ?? [];
+        $totalCost = 0;
+        $products = [];
+
+        foreach ($items as $item) {
+            $cost = (float) ($item['PretaxAmount'] ?? 0);
+            if ($cost <= 0) continue;
+            $totalCost += $cost;
+            $products[] = [
+                'ProductName' => $item['ProductName'] ?? '',
+                'ProductCode' => $item['ProductCode'] ?? '',
+                'PretaxAmount' => round($cost, 2),
+                'PaymentAmount' => round((float) ($item['PaymentAmount'] ?? 0), 2)
+            ];
+        }
+
+        // 按费用降序排列
+        usort($products, function ($a, $b) {
+            return $b['PretaxAmount'] <=> $a['PretaxAmount'];
+        });
+
+        return [
+            'TotalCost' => round($totalCost, 2),
+            'Products' => $products
+        ];
+    }
 }

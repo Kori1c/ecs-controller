@@ -200,6 +200,19 @@
                         <span class="text-sm font-medium text-gray-500">账号</span>
                         <span class="text-sm font-medium text-[#1C1C1E] font-mono">{{ item.account }}</span>
                     </div>
+                    <div v-if="item.cost && item.cost.enabled" class="flex justify-between items-center">
+                        <span class="text-sm font-medium text-gray-500">本月费用</span>
+                        <span v-if="!item.cost.error" class="text-xs font-medium">
+                            <span v-if="item.cost.monthly_cost !== null" class="font-bold text-orange-500">¥{{
+                                item.cost.monthly_cost }}</span>
+                            <span v-if="item.cost.monthly_cost !== null && item.cost.balance !== null"
+                                class="text-gray-300 mx-1">|</span>
+                            <span v-if="item.cost.balance !== null" class="text-gray-400">余<span class="font-bold"
+                                    :class="parseFloat(item.cost.balance) < 100 ? 'text-red-500' : 'text-green-600'">¥{{
+                                    item.cost.balance }}</span></span>
+                        </span>
+                        <span v-else class="text-[10px] text-gray-400">{{ item.cost.error }}</span>
+                    </div>
                     <div v-if="item.remark" class="flex justify-between items-center">
                         <span class="text-sm font-medium text-gray-500">备注</span>
                         <span class="text-sm font-medium text-[#1C1C1E]">{{ item.remark }}</span>
@@ -268,6 +281,8 @@
                 </div>
             </div>
         </div>
+
+
 
         <div v-if="criticalError"
             class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-red-50/50 backdrop-blur-sm">
@@ -460,6 +475,39 @@
                                     <input type="checkbox" v-model="config.enable_schedule_email" id="toggle-sched"
                                         class="peer sr-only" />
                                     <label for="toggle-sched"
+                                        class="block overflow-hidden h-5 w-10 rounded-full bg-gray-300 cursor-pointer transition-colors peer-checked:bg-[#1C1C1E]"></label>
+                                    <div
+                                        class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-between pt-2">
+                                <div class="flex items-center gap-1">
+                                    <label class="text-xs font-medium text-gray-500 ml-2">成本分析 (BSS)</label>
+                                    <div class="group relative flex items-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                                            stroke-width="1.5" stroke="currentColor"
+                                            class="w-3.5 h-3.5 text-gray-400 cursor-help hover:text-gray-600 transition-colors">
+                                            <path stroke-linecap="round" stroke-linejoin="round"
+                                                d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                                        </svg>
+                                        <div
+                                            class="tooltip-content absolute bottom-full mb-2 w-64 md:w-72 p-4 bg-[#1C1C1E]/95 backdrop-blur-md text-white text-xs rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.3)] z-50 border border-gray-700 pointer-events-none text-left leading-relaxed">
+                                            <p class="text-gray-300">调用阿里云 BSS 费用中心 API，在实例卡片上显示<span
+                                                    class="text-orange-400 font-bold">本月费用</span>和<span
+                                                    class="text-green-400 font-bold">账户余额</span>。需要 AccessKey 具有
+                                                bssapi 权限。</p>
+                                            <div
+                                                class="absolute top-full left-10 md:left-1/2 md:-translate-x-1/2 -mt-2 border-8 border-transparent border-t-[#1C1C1E]/95">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="relative inline-block w-10 mr-2">
+                                    <input type="checkbox" v-model="config.enable_billing" id="toggle-billing"
+                                        class="peer sr-only" />
+                                    <label for="toggle-billing"
                                         class="block overflow-hidden h-5 w-10 rounded-full bg-gray-300 cursor-pointer transition-colors peer-checked:bg-[#1C1C1E]"></label>
                                     <div
                                         class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full transition-transform peer-checked:translate-x-5">
@@ -955,6 +1003,8 @@
                 let chartInstance = null;
                 let currentChartData = {};
 
+
+
                 // 阿里云地域数据
                 const aliyunRegions = [
                     { id: 'cn-hongkong', name: '中国香港' },
@@ -1326,9 +1376,13 @@
                             }
                         }
 
+                        if (typeof data.enable_billing === 'undefined') data.enable_billing = false;
+
                         config.value = data;
                     } catch (e) { console.error(e); }
                 };
+
+
 
                 const saveConfig = async () => {
                     if (!config.value) return;
@@ -1436,6 +1490,7 @@
                     statusData, loading, isAdmin, checkingLogin, showLoginModal, passwordInput, config, initialized, loadingCheckInit, setupData, criticalError,
                     regionSearchFocus, aliyunRegions, refreshingMap, systemLogs, cronWarning,
                     showChartModal, chartLoading, chartMode, currentChartAccount, openChart, closeChart, switchChartMode, isChartEmpty,
+
                     toggleAdmin, performLogin, saveConfig, sendTestEmail, sendingEmail, addAccount, removeAccount, getInstanceStatusColor, performSetup, refreshSingle, fetchLogs,
                     currentLogTab, clearLogs, logAutoRefresh,
                     currentNotifyTab, testingTelegram, testingWebhook, sendTestTelegram, sendTestWebhook

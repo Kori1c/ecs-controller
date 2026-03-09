@@ -121,6 +121,17 @@ class Database
         )");
         $this->pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_traffic_daily_unique ON traffic_daily (account_id, recorded_at)");
 
+        // 3. 账单缓存表 (BSS API 结果缓存)
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS billing_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id INTEGER NOT NULL,
+            cache_type TEXT NOT NULL,
+            billing_cycle TEXT DEFAULT '',
+            data TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(account_id, cache_type, billing_cycle)
+        )");
+
         $this->ensureColumn('accounts', 'traffic_used', 'REAL DEFAULT 0');
         $this->ensureColumn('accounts', 'instance_status', "TEXT DEFAULT 'Unknown'");
         $this->ensureColumn('accounts', 'updated_at', 'INTEGER DEFAULT 0');
@@ -371,5 +382,42 @@ class Database
 
         $dayLimit = time() - (60 * 86400);
         $this->pdo->exec("DELETE FROM traffic_daily WHERE recorded_at < $dayLimit");
+    }
+
+    // --- 账单缓存相关方法 ---
+
+    /**
+     * 写入/更新账单缓存
+     */
+    public function setBillingCache($accountId, $cacheType, $billingCycle, $data)
+    {
+        $stmt = $this->pdo->prepare("INSERT OR REPLACE INTO billing_cache (account_id, cache_type, billing_cycle, data, updated_at) VALUES (?, ?, ?, ?, ?)");
+        $stmt->execute([$accountId, $cacheType, $billingCycle, json_encode($data), time()]);
+    }
+
+    /**
+     * 读取账单缓存 (含过期判断)
+     * @param int $maxAge 最大缓存时间(秒)，默认6小时
+     * @return array|null 缓存数据或 null(已过期/不存在)
+     */
+    public function getBillingCache($accountId, $cacheType, $billingCycle, $maxAge = 21600)
+    {
+        $stmt = $this->pdo->prepare("SELECT data, updated_at FROM billing_cache WHERE account_id = ? AND cache_type = ? AND billing_cycle = ? LIMIT 1");
+        $stmt->execute([$accountId, $cacheType, $billingCycle]);
+        $row = $stmt->fetch();
+
+        if (!$row) return null;
+        if ((time() - $row['updated_at']) > $maxAge) return null;
+
+        return json_decode($row['data'], true);
+    }
+
+    /**
+     * 清理超过90天的历史账单缓存
+     */
+    public function pruneBillingCache()
+    {
+        $limit = time() - (90 * 86400);
+        $this->pdo->exec("DELETE FROM billing_cache WHERE updated_at < $limit");
     }
 }
