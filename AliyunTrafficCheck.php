@@ -672,7 +672,8 @@ class AliyunTrafficCheck
             try {
                 $balance = $this->aliyunService->getAccountBalance(
                     $account['access_key_id'],
-                    $account['access_key_secret']
+                    $account['access_key_secret'],
+                    $account['region_id']
                 );
                 $costInfo['balance'] = $balance['AvailableAmount'];
                 $costInfo['currency'] = $balance['Currency'] ?? 'CNY';
@@ -693,7 +694,8 @@ class AliyunTrafficCheck
                         $account['access_key_id'],
                         $account['access_key_secret'],
                         $account['instance_id'],
-                        $billingCycle
+                        $billingCycle,
+                        $account['region_id']
                     );
                     $costInfo['monthly_cost'] = $bill['TotalCost'];
                     $this->db->setBillingCache($account['id'], 'instance_bill', $billingCycle, $bill);

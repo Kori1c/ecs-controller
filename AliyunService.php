@@ -88,6 +88,25 @@ class AliyunService
     }
 
     /**
+     * 获取 BSS 费用中心 API 的 regionId 和 endpoint
+     * 中国站（国内区域）: cn-hangzhou + business.aliyuncs.com
+     * 国际站（海外区域）: ap-southeast-1 + business.ap-southeast-1.aliyuncs.com
+     */
+    private function getBssEndpoint($targetRegion)
+    {
+        if ($this->isOverseas($targetRegion)) {
+            return [
+                'regionId' => 'ap-southeast-1',
+                'host'     => 'business.ap-southeast-1.aliyuncs.com'
+            ];
+        }
+        return [
+            'regionId' => 'cn-hangzhou',
+            'host'     => 'business.aliyuncs.com'
+        ];
+    }
+
+    /**
      * 获取 CDT 流量
      * @param string $key AccessKey
      * @param string $secret Secret
@@ -238,16 +257,18 @@ class AliyunService
      * @return array ['AvailableAmount' => '...', 'Currency' => 'CNY']
      * @throws \Exception
      */
-    public function getAccountBalance($key, $secret)
+    public function getAccountBalance($key, $secret, $targetRegion = 'cn-hangzhou')
     {
         $cacheKey = md5($key);
         if (isset($this->balanceCache[$cacheKey])) {
             return $this->balanceCache[$cacheKey];
         }
 
-        $result = $this->executeWithRetry(function () use ($key, $secret) {
+        $bss = $this->getBssEndpoint($targetRegion);
+
+        $result = $this->executeWithRetry(function () use ($key, $secret, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
-                ->regionId('cn-hangzhou')
+                ->regionId($bss['regionId'])
                 ->asDefaultClient();
 
             return AlibabaCloud::rpc()
@@ -256,7 +277,7 @@ class AliyunService
                 ->version('2017-12-14')
                 ->action('QueryAccountBalance')
                 ->method('POST')
-                ->host('business.aliyuncs.com')
+                ->host($bss['host'])
                 ->options([
                     'connect_timeout' => 5.0,
                     'timeout' => 10.0
@@ -282,11 +303,13 @@ class AliyunService
      * @return array ['TotalCost' => float, 'Items' => [...]]
      * @throws \Exception
      */
-    public function getInstanceBill($key, $secret, $instanceId, $billingCycle)
+    public function getInstanceBill($key, $secret, $instanceId, $billingCycle, $targetRegion = 'cn-hangzhou')
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $instanceId, $billingCycle) {
+        $bss = $this->getBssEndpoint($targetRegion);
+
+        $result = $this->executeWithRetry(function () use ($key, $secret, $instanceId, $billingCycle, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
-                ->regionId('cn-hangzhou')
+                ->regionId($bss['regionId'])
                 ->asDefaultClient();
 
             return AlibabaCloud::rpc()
@@ -295,7 +318,7 @@ class AliyunService
                 ->version('2017-12-14')
                 ->action('DescribeInstanceBill')
                 ->method('POST')
-                ->host('business.aliyuncs.com')
+                ->host($bss['host'])
                 ->options([
                     'query' => [
                         'BillingCycle' => $billingCycle,
@@ -340,11 +363,13 @@ class AliyunService
      * @return array ['TotalCost' => float, 'Products' => [...]]
      * @throws \Exception
      */
-    public function getBillOverview($key, $secret, $billingCycle)
+    public function getBillOverview($key, $secret, $billingCycle, $targetRegion = 'cn-hangzhou')
     {
-        $result = $this->executeWithRetry(function () use ($key, $secret, $billingCycle) {
+        $bss = $this->getBssEndpoint($targetRegion);
+
+        $result = $this->executeWithRetry(function () use ($key, $secret, $billingCycle, $bss) {
             AlibabaCloud::accessKeyClient($key, $secret)
-                ->regionId('cn-hangzhou')
+                ->regionId($bss['regionId'])
                 ->asDefaultClient();
 
             return AlibabaCloud::rpc()
@@ -353,7 +378,7 @@ class AliyunService
                 ->version('2017-12-14')
                 ->action('QueryBillOverview')
                 ->method('POST')
-                ->host('business.aliyuncs.com')
+                ->host($bss['host'])
                 ->options([
                     'query' => [
                         'BillingCycle' => $billingCycle
