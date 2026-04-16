@@ -281,6 +281,8 @@ class ConfigManager
             $this->saveSetting('monthly_auto_start', !empty($data['monthly_auto_start']) ? '1' : '0');
             $this->saveSetting('api_interval', $data['api_interval'] ?? 600);
             $this->saveSetting('enable_billing', !empty($data['enable_billing']) ? '1' : '0');
+            $appBrand = is_array($data['AppBrand'] ?? null) ? $data['AppBrand'] : [];
+            $this->saveSetting('app_logo_url', trim((string) ($appBrand['logo_url'] ?? '')));
             $this->saveDdnsSettings($data['Ddns'] ?? []);
 
             if (isset($data['Notification'])) {
@@ -493,6 +495,12 @@ class ConfigManager
         }
 
         $this->updateLastInstanceSyncTime(time());
+        $this->load();
+    }
+
+    public function updateAppLogoUrl($url)
+    {
+        $this->saveSetting('app_logo_url', trim((string) $url));
         $this->load();
     }
 

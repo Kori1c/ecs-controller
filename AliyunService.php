@@ -156,8 +156,8 @@ class AliyunService
                     ->method('POST')
                     ->host('cdt.aliyuncs.com')
                     ->options([
-                        'connect_timeout' => 5.0,
-                        'timeout' => 10.0
+                        'connect_timeout' => 10.0,
+                        'timeout' => 20.0
                     ])
                     ->request();
             }, 'getTraffic');
@@ -301,8 +301,8 @@ class AliyunService
                         ->host('metrics.aliyuncs.com')
                         ->options([
                             'query' => $query,
-                            'connect_timeout' => 5.0,
-                            'timeout' => 15.0
+                            'connect_timeout' => 10.0,
+                            'timeout' => 25.0
                         ])
                         ->request();
                 }, 'queryMetricRateAsBytes');
@@ -363,8 +363,8 @@ class AliyunService
             $options = [
                 'query' => ['RegionId' => $account['region_id']],
                 // 优化点3: 同样缩短实例状态查询的超时
-                'connect_timeout' => 5.0,
-                'timeout' => 10.0
+                'connect_timeout' => 10.0,
+                'timeout' => 20.0
             ];
 
             if (!empty($account['instance_id'])) {
@@ -413,8 +413,8 @@ class AliyunService
                     'RegionId' => $account['region_id'],
                     'InstanceId.1' => $account['instance_id']
                 ],
-                'connect_timeout' => 5.0,
-                'timeout' => 10.0
+                'connect_timeout' => 10.0,
+                'timeout' => 20.0
             ];
 
             $result = AlibabaCloud::rpc()
@@ -468,8 +468,8 @@ class AliyunService
                             'InstanceId' => $account['instance_id'],
                             'Force' => true,
                         ],
-                        'connect_timeout' => 5.0,
-                        'timeout' => 15.0
+                        'connect_timeout' => 10.0,
+                        'timeout' => 25.0
                     ])
                     ->request();
 
@@ -504,8 +504,8 @@ class AliyunService
                     'InstanceId' => $account['instance_id']
                 ],
                 // 优化点4: 控制操作保持一致，确保用户操作不卡死
-                'connect_timeout' => 5.0,
-                'timeout' => 10.0
+                'connect_timeout' => 10.0,
+                'timeout' => 20.0
             ];
 
             if ($action === 'stop') {
@@ -625,8 +625,8 @@ class AliyunService
                                     'PageSize' => 100,
                                     'PageNumber' => $pageNumber
                                 ],
-                                'connect_timeout' => 8.0,
-                                'timeout' => 20.0
+                                'connect_timeout' => 15.0,
+                                'timeout' => 30.0
                             ])
                             ->request();
                     }, 'getInstances');
@@ -691,6 +691,7 @@ class AliyunService
             $instanceName = 'launch-' . date('Ymd-His');
         }
         $requestedDiskSize = (int) ($request['systemDiskSize'] ?? 20);
+        $requestedDiskCategory = trim((string) ($request['systemDiskCategory'] ?? 'cloud_essd_entry'));
 
         if ($regionId === '') {
             throw new \Exception('请选择区域');
@@ -702,7 +703,7 @@ class AliyunService
         $zone = $this->selectAvailableZone($key, $secret, $regionId, $instanceType);
         $instanceTypeInfo = $this->describeInstanceType($key, $secret, $regionId, $instanceType);
         $image = $this->selectSystemImage($key, $secret, $regionId, $osKey, $instanceTypeInfo['CpuArchitecture'] ?? '');
-        $diskCategory = $this->selectDiskCategory($zone);
+        $diskCategory = $this->selectDiskCategory($zone, $requestedDiskCategory);
         $diskRange = $this->getSystemDiskSizeRange($key, $secret, $regionId, $zone['zoneId'], $instanceType, $diskCategory);
         $diskSize = $this->normalizeSystemDiskSize($requestedDiskSize, $diskRange);
         $bandwidth = $this->estimateMaxBandwidthOut($instanceType, $regionId);
@@ -772,6 +773,67 @@ class AliyunService
                 '文件备份默认不启用；如需备份，请创建后在阿里云控制台单独开启。',
                 '安全组默认全开，便于测试和交付；生产环境建议创建后收紧来源 IP 和端口。'
             ]))
+        ];
+    }
+
+    public function getAvailableSystemDiskOptions($account, array $request)
+    {
+        $regionId = trim((string) ($request['regionId'] ?? $account['region_id'] ?? ''));
+        $instanceType = trim((string) ($request['instanceType'] ?? '')) ?: 'ecs.e-c4m1.large';
+
+        if ($regionId === '') {
+            throw new \Exception('请选择区域');
+        }
+
+        $key = $account['access_key_id'];
+        $secret = $account['access_key_secret'];
+        $zone = $this->selectAvailableZone($key, $secret, $regionId, $instanceType);
+        $rawCategories = $zone['raw']['AvailableDiskCategories']['DiskCategories'] ?? $zone['raw']['AvailableDiskCategories']['DiskCategory'] ?? [];
+        $rawCategories = is_array($rawCategories) ? $rawCategories : [];
+        $candidates = $rawCategories ?: ['cloud_essd_entry', 'cloud_essd', 'cloud_efficiency', 'cloud'];
+        $candidates = array_values(array_filter($candidates, function ($category) {
+            return $category !== 'cloud_auto';
+        }));
+        $preferredOrder = ['cloud_essd_entry', 'cloud_essd', 'cloud_efficiency', 'cloud'];
+        $candidates = array_values(array_unique(array_filter($candidates)));
+        usort($candidates, function ($a, $b) use ($preferredOrder) {
+            $aIndex = array_search($a, $preferredOrder, true);
+            $bIndex = array_search($b, $preferredOrder, true);
+            $aIndex = $aIndex === false ? 99 : $aIndex;
+            $bIndex = $bIndex === false ? 99 : $bIndex;
+            return $aIndex <=> $bIndex ?: strcmp($a, $b);
+        });
+
+        $options = [];
+        $errors = [];
+        foreach ($candidates as $category) {
+            try {
+                $range = $this->getSystemDiskSizeRange($key, $secret, $regionId, $zone['zoneId'], $instanceType, $category);
+                $options[] = [
+                    'value' => $category,
+                    'label' => $this->diskCategoryLabel($category),
+                    'min' => $range['min'],
+                    'max' => $range['max'],
+                    'unit' => $range['unit'],
+                    'zoneId' => $zone['zoneId'],
+                    'status' => $range['status'] ?? '',
+                    'statusCategory' => $range['statusCategory'] ?? ''
+                ];
+            } catch (\Exception $e) {
+                $errors[$category] = $e->getMessage();
+            }
+        }
+
+        if (empty($options)) {
+            throw new \Exception('当前账号区域和实例规格没有可用的系统盘类型，请更换实例规格后重试');
+        }
+
+        return [
+            'regionId' => $regionId,
+            'zoneId' => $zone['zoneId'],
+            'instanceType' => $instanceType,
+            'options' => $options,
+            'errors' => $errors
         ];
     }
 
@@ -1763,16 +1825,36 @@ class AliyunService
             || (strpos($message, 'disk') !== false && strpos($message, 'size') !== false);
     }
 
-    private function selectDiskCategory($zone)
+    private function selectDiskCategory($zone, $requested = 'cloud_essd_entry')
     {
         $raw = $zone['raw']['AvailableDiskCategories']['DiskCategories'] ?? $zone['raw']['AvailableDiskCategories']['DiskCategory'] ?? [];
         $categories = is_array($raw) ? $raw : [];
-        foreach (['cloud_essd_entry', 'cloud_essd', 'cloud_auto', 'cloud_efficiency', 'cloud'] as $preferred) {
+        $requested = trim((string) $requested);
+        if ($requested !== '') {
+            if (empty($categories) || in_array($requested, $categories, true)) {
+                return $requested;
+            }
+            throw new \Exception("当前可用区不支持所选硬盘类型 {$requested}，请更换硬盘类型或实例规格后重试");
+        }
+
+        foreach (['cloud_essd_entry', 'cloud_essd', 'cloud_efficiency', 'cloud'] as $preferred) {
             if (empty($categories) || in_array($preferred, $categories, true)) {
                 return $preferred;
             }
         }
         return 'cloud_essd_entry';
+    }
+
+    private function diskCategoryLabel($category)
+    {
+        $map = [
+            'cloud_essd_entry' => 'ESSD Entry 云盘',
+            'cloud_essd' => 'ESSD 云盘',
+            'cloud_efficiency' => '高效云盘',
+            'cloud' => '普通云盘'
+        ];
+
+        return $map[$category] ?? $category;
     }
 
     private function estimateMaxBandwidthOut($instanceType, $regionId)

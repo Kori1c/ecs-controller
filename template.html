@@ -137,6 +137,14 @@
         .select-shell {
             position: relative;
             width: 100%;
+            min-width: 0;
+        }
+
+        .select-shell.glass-select {
+            padding: 0;
+            border: 0;
+            background: transparent;
+            box-shadow: none;
         }
 
         .select-shell.open {
@@ -765,6 +773,10 @@
             grid-column: 1 / -1;
         }
 
+        .create-modal .modal-field-full {
+            grid-column: auto;
+        }
+
         .create-modal {
             width: min(920px, 100%);
             max-height: min(86vh, 860px);
@@ -833,6 +845,30 @@
             font-size: 0.8rem;
             font-weight: 600;
             color: var(--muted);
+        }
+
+        .settings-save-float {
+            position: fixed;
+            right: clamp(18px, 4vw, 44px);
+            bottom: max(28px, env(safe-area-inset-bottom));
+            z-index: 70;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px 10px 16px;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
+            backdrop-filter: blur(18px);
+            animation: panel-fade-up .18s ease both;
+        }
+
+        .settings-save-float__hint {
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #64748b;
+            white-space: nowrap;
         }
 
         .account-card-grid {
@@ -1092,6 +1128,54 @@
 
         .page-brand {
             min-width: 0;
+        }
+
+        .brand-lockup {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            width: 48px;
+            height: 48px;
+            flex: 0 0 48px;
+            border-radius: 16px;
+            object-fit: contain;
+            background: #ffffff;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+        }
+
+        .brand-logo-fallback {
+            width: 48px;
+            height: 48px;
+            flex: 0 0 48px;
+            border-radius: 16px;
+            background: #1f2937;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            font-weight: 900;
+        }
+
+        .brand-logo-preview {
+            width: 72px;
+            height: 72px;
+            border-radius: 20px;
+            object-fit: contain;
+            background: #ffffff;
+            border: 1px solid var(--line);
+            box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+        }
+
+        .login-brand-logo {
+            width: 68px;
+            height: 68px;
+            flex-basis: 68px;
+            border-radius: 20px;
         }
 
         .page-actions {
@@ -1584,6 +1668,30 @@
                 border-radius: 16px;
             }
 
+            app-select.glass-select,
+            .modal-form-grid app-select.glass-select,
+            .account-modal app-select.glass-select {
+                display: block;
+                width: 100%;
+            }
+
+            app-select.glass-select .select-shell {
+                width: 100%;
+            }
+
+            .select-trigger {
+                border-radius: 16px;
+                min-height: 46px;
+            }
+
+            .settings-save-float {
+                left: 16px;
+                right: 16px;
+                bottom: calc(96px + env(safe-area-inset-bottom));
+                justify-content: space-between;
+                border-radius: 20px;
+            }
+
             .two-col-grid {
                 grid-template-columns: 1fr;
             }
@@ -1632,8 +1740,9 @@
             <header v-if="initialized && !loadingCheckInit && !criticalError && isAdmin" class="glass-panel page-header">
                 <div class="page-header__row">
                     <div class="page-brand">
-                        <div class="flex items-center gap-3">
-                            <div class="h-12 w-12 rounded-2xl bg-[#1f2937] text-white flex items-center justify-center text-lg font-black">C</div>
+                        <div class="brand-lockup">
+                            <img v-if="brandLogoUrl" :src="brandLogoUrl" alt="页面 Logo" class="brand-logo">
+                            <div v-else class="brand-logo-fallback">C</div>
                             <div>
                                 <p class="subtle-label">云服务器流量管理</p>
                                 <h1 class="text-2xl font-black tracking-tight md:text-3xl">ECS 服务器管理</h1>
@@ -1663,6 +1772,10 @@
 
             <div v-if="initialized && !loadingCheckInit && !criticalError && !isAdmin" class="fixed inset-0 z-40 flex items-center justify-center p-4">
                 <div class="glass-panel login-gate-card">
+                    <div class="mb-5 flex justify-center">
+                        <img v-if="brandLogoUrl" :src="brandLogoUrl" alt="页面 Logo" class="brand-logo login-brand-logo">
+                        <div v-else class="brand-logo-fallback login-brand-logo">C</div>
+                    </div>
                     <p class="subtle-label">管理员登录</p>
                     <h2 class="mt-2 text-2xl font-black">管理员登录</h2>
                     <p class="mt-3 text-sm leading-6 text-slate-500">登录后才可查看实例状态、实例管理、账号配置、系统设置和系统日志。</p>
@@ -1828,6 +1941,7 @@
                                         { value: 'Stopped', label: '已停止' },
                                         { value: 'Starting', label: '启动中' },
                                         { value: 'Stopping', label: '停止中' },
+                                        { value: 'Releasing', label: '释放中' },
                                         { value: 'Unknown', label: '未知' }
                                     ]"
                                 />
@@ -1884,7 +1998,10 @@
                                         </div>
                                     </div>
                                     <div class="summary-cell center-column">
-                                        <div class="row-actions">
+                                        <div v-if="inst.operationLocked || inst.instanceStatus === 'Releasing'" class="text-xs font-semibold text-[#d97706]">
+                                            释放中，不可操作
+                                        </div>
+                                        <div v-else class="row-actions">
                                             <button v-if="inst.instanceStatus === 'Stopped' || inst.instanceStatus === 'Unknown'" @click="controlInstance(inst.id, 'start')" class="success-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">启动</button>
                                             <button v-if="inst.instanceStatus === 'Running'" @click="controlInstance(inst.id, 'stop')" class="warning-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">停止</button>
                                             <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button !px-3 !py-1.5 !text-xs" :disabled="isRefreshingInstance(inst.id)">更换 IP</button>
@@ -1915,7 +2032,10 @@
                                     <div><span class="text-[#7c8698]">地址</span><p class="mt-1 font-mono text-xs">{{ inst.publicIp || inst.privateIp || '-' }}</p><p class="mt-1 text-xs text-[#7c8698]">{{ inst.publicIpMode === 'eip' ? 'EIP' : 'ECS 公网' }}</p></div>
                                     <div><span class="text-[#7c8698]">公网带宽峰值</span><p class="mt-1">{{ inst.internetMaxBandwidthOut ? inst.internetMaxBandwidthOut + ' Mbps' : '-' }}</p></div>
                                 </div>
-                                <div class="mt-4 flex gap-2">
+                                <div v-if="inst.operationLocked || inst.instanceStatus === 'Releasing'" class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-center text-xs font-semibold text-amber-700">
+                                    释放中，不可操作
+                                </div>
+                                <div v-else class="mt-4 flex gap-2">
                                     <button v-if="inst.instanceStatus === 'Stopped' || inst.instanceStatus === 'Unknown'" @click="controlInstance(inst.id, 'start')" class="success-button flex-1" :disabled="isRefreshingInstance(inst.id)">启动</button>
                                     <button v-if="inst.instanceStatus === 'Running'" @click="controlInstance(inst.id, 'stop')" class="warning-button flex-1" :disabled="isRefreshingInstance(inst.id)">停止</button>
                                     <button v-if="canReplaceIp(inst)" @click="replaceInstanceIp(inst.id)" class="ghost-button flex-1" :disabled="isRefreshingInstance(inst.id)">更换 IP</button>
@@ -2063,6 +2183,24 @@
                                     <h3 class="mt-1 text-lg font-bold">全局设置</h3>
                                 </div>
                                 <div class="space-y-3">
+                                    <div class="rounded-[18px] border border-slate-200/70 bg-white/70 p-4">
+                                        <label class="mb-3 block text-sm font-semibold text-[#6f7787]">页面 Logo</label>
+                                        <div class="flex flex-wrap items-center gap-4">
+                                            <img v-if="brandLogoUrl" :src="brandLogoUrl" alt="页面 Logo 预览" class="brand-logo-preview">
+                                            <div v-else class="brand-logo-fallback !h-[72px] !w-[72px] !rounded-[20px]">C</div>
+                                            <div class="min-w-[220px] flex-1 space-y-3">
+                                                <input v-model="config.AppBrand.logo_url" class="glass-input" placeholder="Logo 图片地址，或上传本地图片">
+                                                <div class="flex flex-wrap gap-2">
+                                                    <label class="ghost-button cursor-pointer">
+                                                        {{ uploadingLogo ? '上传中...' : '上传 Logo' }}
+                                                        <input type="file" class="hidden" accept="image/png,image/jpeg,image/webp" :disabled="uploadingLogo" @change="uploadLogo">
+                                                    </label>
+                                                    <button v-if="config.AppBrand.logo_url" @click="clearLogo" type="button" class="danger-button">清除 Logo</button>
+                                                </div>
+                                                <p class="text-xs leading-5 text-[#7c8698]">支持 PNG、JPG、WebP，上传文件小于 2MB。也可以直接填写图片 URL。</p>
+                                            </div>
+                                        </div>
+                                    </div>
                                     <div>
                                         <label class="mb-2 block text-sm font-semibold text-[#6f7787]">管理员密码</label>
                                         <input v-model="config.admin_password" type="text" class="glass-input">
@@ -2285,9 +2423,6 @@
                             </div>
                         </div>
 
-                        <div class="mt-6 flex justify-end">
-                            <button @click="saveConfig" class="solid-button">保存系统设置</button>
-                        </div>
                     </section>
 
                     <section v-if="currentMenu === 'logs' && isAdmin" class="glass-panel section-panel">
@@ -2339,6 +2474,13 @@
             </nav>
         </div>
 
+        <transition name="select-pop">
+            <div v-if="settingsDirty" class="settings-save-float">
+                <span class="settings-save-float__hint">系统设置有未保存改动</span>
+                <button @click="saveConfig" class="solid-button">保存系统设置</button>
+            </div>
+        </transition>
+
         <transition-group name="toast" tag="div" class="toast-stack">
             <div v-for="toast in toasts" :key="toast.id" class="toast-card" :class="toast.type">
                 <div class="toast-title">{{ toast.type === 'error' ? '错误' : toast.type === 'success' ? '完成' : '提示' }}</div>
@@ -2375,6 +2517,10 @@
 
         <div v-if="showLoginModal && isAdmin" class="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4 backdrop-blur-sm">
             <div class="glass-panel w-full max-w-md rounded-[34px] p-8">
+                <div class="mb-5 flex justify-center">
+                    <img v-if="brandLogoUrl" :src="brandLogoUrl" alt="页面 Logo" class="brand-logo login-brand-logo">
+                    <div v-else class="brand-logo-fallback login-brand-logo">C</div>
+                </div>
                 <p class="subtle-label">管理员登录</p>
                 <h2 class="mt-2 text-2xl font-black">管理员登录</h2>
                 <input v-model="passwordInput" type="password" class="glass-input mt-6" placeholder="请输入管理员密码">
@@ -2457,17 +2603,14 @@
 
                 <div v-if="!ecsCreatePreview" class="modal-form-grid">
                     <div>
-                        <label class="field-label">账号</label>
+                        <label class="field-label">账号 / 区域</label>
                         <app-select
                             v-model="ecsCreateDraft.accountGroupKey"
                             class="glass-select"
                             placeholder="请选择账号"
                             :options="accountOptions"
                         />
-                    </div>
-                    <div>
-                        <label class="field-label">区域</label>
-                        <input :value="selectedCreateAccountRegionName" class="glass-input" disabled>
+                        <p class="mt-2 text-xs text-slate-500">创建区域跟随账号配置，避免跨区域创建后无法归属到当前账号组。</p>
                     </div>
                     <div>
                         <label class="field-label">实例规格</label>
@@ -2493,12 +2636,23 @@
                         />
                         <p class="mt-2 text-xs text-slate-500">EIP 支持后续一键更换 IP；停机不释放，释放 ECS 时自动释放系统创建的 EIP。</p>
                     </div>
-                    <div class="modal-field-full">
+                    <div>
+                        <label class="field-label">硬盘类型</label>
+                        <app-select
+                            v-model="ecsCreateDraft.systemDiskCategory"
+                            class="glass-select"
+                            :disabled="ecsDiskLoading || ecsDiskCategoryOptions.length === 0"
+                            :options="ecsDiskCategorySelectOptions"
+                        />
+                        <p class="mt-2 text-xs text-slate-500">
+                            {{ ecsDiskLoading ? '正在从阿里云获取当前规格支持的硬盘类型...' : ecsDiskHint }}
+                        </p>
+                    </div>
+                    <div>
                         <label class="field-label">系统盘大小（GB）</label>
                         <input v-model.number="ecsCreateDraft.systemDiskSize" type="number" min="1" class="glass-input" placeholder="20">
-                        <p class="mt-2 text-xs text-amber-700">成本敏感项，默认 20G，可自定义。点击下一步后会按阿里云 API 返回的当前规格/磁盘类型范围校验，超出范围会直接报错，不会自动放大磁盘。</p>
                     </div>
-                    <div class="modal-field-full">
+                    <div>
                         <label class="field-label">实例备注 / 名称</label>
                         <input v-model="ecsCreateDraft.instanceName" class="glass-input" placeholder="launch-20260415-2010">
                     </div>
@@ -2624,6 +2778,10 @@
 
         <div v-if="!initialized && !loadingCheckInit && !criticalError" class="setup-overlay">
             <div class="glass-panel setup-card">
+                <div class="mb-4 flex justify-center">
+                    <img v-if="brandLogoUrl" :src="brandLogoUrl" alt="页面 Logo" class="brand-logo">
+                    <div v-else class="brand-logo-fallback">C</div>
+                </div>
                 <p class="subtle-label">初始化向导</p>
                 <h2 class="setup-title">初始化 ECS 服务器管理</h2>
                 <p class="setup-desc">首次使用时设置管理员密码、流量保护阈值和默认停机方式，后续可在系统设置中调整。</p>
@@ -2841,6 +2999,9 @@
                     monthly_auto_start: false,
                     api_interval: 600,
                     enable_billing: false,
+                    AppBrand: {
+                        logo_url: ''
+                    },
                     Ddns: {
                         enabled: false,
                         provider: 'cloudflare',
@@ -2897,6 +3058,7 @@
                     instanceType: 'ecs.e-c4m1.large',
                     osKey: 'debian_12',
                     systemDiskSize: 20,
+                    systemDiskCategory: 'cloud_essd_entry',
                     publicIpMode: 'ecs_public_ip',
                     instanceName: `launch-${new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').slice(0, 12)}`
                 });
@@ -2922,11 +3084,13 @@
                 const sendingEmail = ref(false);
                 const testingTelegram = ref(false);
                 const testingWebhook = ref(false);
+                const uploadingLogo = ref(false);
                 const fetchingAllInstances = ref(false);
                 const syncingInstances = ref(false);
                 const refreshingInstanceIds = ref([]);
                 const accountSyncStates = ref({});
                 const accountSyncResults = ref({});
+                const configBaseline = ref('');
                 const toasts = ref([]);
                 const dialogState = ref({
                     open: false,
@@ -2952,6 +3116,9 @@
                 const credentialSavedAck = ref(false);
                 const ecsPreviewing = ref(false);
                 const ecsCreating = ref(false);
+                const ecsDiskLoading = ref(false);
+                const ecsDiskCategoryOptions = ref([]);
+                const ecsDiskHint = ref('请选择账号并填写实例规格后获取硬盘类型。');
                 const setupData = ref({
                     admin_password: '',
                     traffic_threshold: 95,
@@ -2962,6 +3129,7 @@
                 const manageFilter = ref({ account: '', region: '', status: '', search: '' });
                 let logInterval = null;
                 let statusInterval = null;
+                let manageInterval = null;
 
                 const getRegionName = (regionId) => {
                     const found = aliyunRegions.find((item) => item.id === regionId);
@@ -2992,12 +3160,24 @@
                     return unit;
                 };
                 const diskCategoryText = (category) => ({
-                    cloud_auto: '自动选择',
                     cloud_essd_entry: 'ESSD Entry 云盘',
                     cloud_essd: '增强型固态盘',
                     cloud_efficiency: '高效云盘',
                     cloud: '普通云盘'
                 }[category] || category || '-');
+                const brandLogoUrl = computed(() => (config.value.AppBrand?.logo_url || '').trim());
+                const ecsDiskCategorySelectOptions = computed(() => {
+                    if (ecsDiskLoading.value) {
+                        return [{ value: ecsCreateDraft.value.systemDiskCategory || '', label: '正在获取硬盘类型...' }];
+                    }
+                    if (ecsDiskCategoryOptions.value.length === 0) {
+                        return [{ value: '', label: '暂无可用硬盘类型' }];
+                    }
+                    return ecsDiskCategoryOptions.value.map((item) => ({
+                        value: item.value,
+                        label: item.label
+                    }));
+                });
                 const getAccountKey = (account, index) => account?.groupKey || `${account?.remark || 'account'}-${account?.regionId || 'region'}-${index}`;
                 const isRefreshingInstance = (id) => refreshingInstanceIds.value.includes(id);
                 let toastCounter = 0;
@@ -3135,12 +3315,6 @@
                     }) || null;
                 });
 
-                const selectedCreateAccountRegionName = computed(() => {
-                    const account = selectedCreateAccount.value;
-                    if (!account) return '请先选择账号';
-                    return `${getRegionName(account.regionId)} (${account.regionId})`;
-                });
-
                 const filteredStatusInstances = computed(() => {
                     const search = statusFilter.value.search.trim().toLowerCase();
                     return statusInstances.value.filter((item) => {
@@ -3220,6 +3394,10 @@
                     next.Notification = payload?.Notification || next.Notification;
                     next.Notification.telegram = payload?.Notification?.telegram || next.Notification.telegram;
                     next.Notification.webhook = payload?.Notification?.webhook || next.Notification.webhook;
+                    next.AppBrand = {
+                        ...next.AppBrand,
+                        ...(payload?.AppBrand || {})
+                    };
                     next.Ddns = {
                         ...next.Ddns,
                         ...(payload?.Ddns || {}),
@@ -3235,6 +3413,31 @@
 
                     return next;
                 };
+
+                const buildSettingsSnapshot = (value) => {
+                    const source = value || {};
+                    return JSON.stringify({
+                        admin_password: source.admin_password || '',
+                        traffic_threshold: Number(source.traffic_threshold || 95),
+                        shutdown_mode: source.shutdown_mode || 'KeepCharging',
+                        threshold_action: source.threshold_action || 'stop_and_notify',
+                        keep_alive: !!source.keep_alive,
+                        monthly_auto_start: !!source.monthly_auto_start,
+                        api_interval: Number(source.api_interval || 600),
+                        enable_billing: !!source.enable_billing,
+                        AppBrand: source.AppBrand || {},
+                        Ddns: source.Ddns || {},
+                        Notification: source.Notification || {}
+                    });
+                };
+
+                const markConfigClean = () => {
+                    configBaseline.value = buildSettingsSnapshot(config.value);
+                };
+
+                const settingsDirty = computed(() => {
+                    return isAdmin.value && currentMenu.value === 'settings' && configBaseline.value !== '' && buildSettingsSnapshot(config.value) !== configBaseline.value;
+                });
 
                 const fetchStatusData = async (restartPolling = true) => {
                     if (!isAdmin.value) {
@@ -3279,31 +3482,50 @@
                         const res = await fetch('index.php?action=get_config');
                         const data = await res.json();
                         config.value = normalizeConfig(data);
+                        markConfigClean();
                     } catch (error) {
                         console.error('Fetch config failed', error);
                     }
                 };
 
-                const fetchAllInstances = async (sync = false) => {
+                const fetchAllInstances = async (sync = false, options = {}) => {
+                    if (fetchingAllInstances.value && options.silent) {
+                        return;
+                    }
                     fetchingAllInstances.value = true;
                     try {
                         const res = await fetch(`index.php?action=get_all_instances&sync=${sync ? '1' : '0'}`);
                         const data = await res.json();
                         if (data.error) {
-                            openAlert(data.error, 'error');
+                            if (!options.silent) {
+                                openAlert(data.error, 'error');
+                            }
                             allInstances.value = [];
                         } else {
                             allInstances.value = data.data || [];
-                            if (sync) {
+                            if (sync && !options.silent) {
                                 openAlert('实例已从阿里云同步完成', 'success');
                             }
                         }
                     } catch (error) {
                         console.error('Fetch instances failed', error);
-                        openAlert('实例列表请求失败', 'error');
+                        if (!options.silent) {
+                            openAlert('实例列表请求失败', 'error');
+                        }
                     } finally {
                         fetchingAllInstances.value = false;
                     }
+                };
+
+                const reloadInstanceViews = async ({ sync = false, silent = true } = {}) => {
+                    const tasks = [];
+                    if (isAdmin.value) {
+                        tasks.push(fetchStatusData(false));
+                        if (currentMenu.value === 'manage') {
+                            tasks.push(fetchAllInstances(sync, { silent }));
+                        }
+                    }
+                    await Promise.all(tasks);
                 };
 
                 const syncCloudInstances = async () => {
@@ -3379,6 +3601,13 @@
                     }
                 };
 
+                const stopManagePolling = () => {
+                    if (manageInterval) {
+                        clearInterval(manageInterval);
+                        manageInterval = null;
+                    }
+                };
+
                 const startStatusPolling = () => {
                     stopStatusPolling();
                     if (!initialized.value || criticalError.value || currentMenu.value !== 'status') {
@@ -3388,6 +3617,18 @@
                     const intervalSeconds = Math.max(Number(statusSyncInterval.value || 600), 60);
                     statusInterval = setInterval(() => {
                         fetchStatusData(false);
+                    }, intervalSeconds * 1000);
+                };
+
+                const startManagePolling = () => {
+                    stopManagePolling();
+                    if (!initialized.value || criticalError.value || currentMenu.value !== 'manage' || !isAdmin.value) {
+                        return;
+                    }
+
+                    const intervalSeconds = Math.max(Number(statusSyncInterval.value || 600), 60);
+                    manageInterval = setInterval(() => {
+                        fetchAllInstances(false, { silent: true });
                     }, intervalSeconds * 1000);
                 };
 
@@ -3414,6 +3655,7 @@
                         const data = await res.json();
                         if (data.success) {
                             await fetchConfig();
+                            markConfigClean();
                             await fetchStatusData();
                             if (isAdmin.value) {
                                 await fetchAllInstances(false);
@@ -3435,6 +3677,40 @@
 
                 const saveConfig = async () => {
                     return persistConfig();
+                };
+
+                const uploadLogo = async (event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    if (!file) return;
+
+                    const formData = new FormData();
+                    formData.append('logo', file);
+                    uploadingLogo.value = true;
+                    try {
+                        const res = await fetch('index.php?action=upload_logo', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.success) {
+                            openAlert(data.message || 'Logo 上传失败', 'error');
+                            return;
+                        }
+
+                        config.value.AppBrand.logo_url = data.url || '';
+                        markConfigClean();
+                        openAlert('Logo 已更新', 'success');
+                    } catch (error) {
+                        console.error('Upload logo failed', error);
+                        openAlert('Logo 上传请求失败', 'error');
+                    } finally {
+                        uploadingLogo.value = false;
+                    }
+                };
+
+                const clearLogo = () => {
+                    config.value.AppBrand.logo_url = '';
                 };
 
                 const refreshInstanceCard = async (id) => {
@@ -3496,7 +3772,7 @@
                 };
 
                 const canReplaceIp = (inst) => {
-                    return isAdmin.value && inst && inst.publicIpMode === 'eip' && !!inst.eipManaged;
+                    return isAdmin.value && inst && !inst.operationLocked && inst.instanceStatus !== 'Releasing' && inst.publicIpMode === 'eip' && !!inst.eipManaged;
                 };
 
                 const controlInstance = async (accountId, action) => {
@@ -3519,13 +3795,12 @@
                             return;
                         }
                         openAlert(`${label}指令已提交，实例状态正在更新`, 'success');
-                        fetchAllInstances(false);
-                        fetchStatusData(false);
+                        await reloadInstanceViews({ silent: true });
+                        window.setTimeout(() => reloadInstanceViews({ silent: true }), 3500);
                     } catch (error) {
                         console.error('Control instance failed', error);
                         openAlert('操作请求失败', 'error');
-                        fetchAllInstances(false);
-                        fetchStatusData(false);
+                        await reloadInstanceViews({ silent: true });
                     } finally {
                         refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(accountId));
                     }
@@ -3560,8 +3835,7 @@
                             internetMaxBandwidthOut: next.internetMaxBandwidthOut || 0
                         });
                         openAlert(`公网 IP 已更换为 ${next.publicIp || '-'}`, 'success');
-                        fetchAllInstances(false);
-                        fetchStatusData(false);
+                        await reloadInstanceViews({ silent: true });
                     } catch (error) {
                         console.error('Replace instance IP failed', error);
                         openAlert('公网 IP 更换请求失败', 'error');
@@ -3586,18 +3860,22 @@
                         const data = await res.json();
                         if (!data.success) {
                             openAlert('释放失败', 'error');
-                            fetchAllInstances(false);
-                            fetchStatusData(false);
+                            await reloadInstanceViews({ silent: true });
                             return;
                         }
-                        openAlert('释放指令已完成，实例已从列表移除', 'success');
-                        fetchAllInstances(false);
-                        fetchStatusData(false);
+                        patchInstanceLists(accountId, {
+                            instanceStatus: 'Releasing',
+                            status: 'Releasing',
+                            operationLocked: true,
+                            operationLockedReason: '实例正在释放中，后台队列会继续处理。'
+                        });
+                        openAlert('释放指令已提交，实例进入释放队列', 'success');
+                        await reloadInstanceViews({ silent: true });
+                        window.setTimeout(() => reloadInstanceViews({ silent: true }), 3500);
                     } catch (error) {
                         console.error('Delete instance failed', error);
                         openAlert('释放请求失败', 'error');
-                        fetchAllInstances(false);
-                        fetchStatusData(false);
+                        await reloadInstanceViews({ silent: true });
                     } finally {
                         refreshingInstanceIds.value = refreshingInstanceIds.value.filter((itemId) => Number(itemId) !== Number(accountId));
                     }
@@ -3727,12 +4005,14 @@
                     ecsCreateConfirmed.value = false;
                     ecsCreateResult.value = null;
                     showCreateEcsModal.value = true;
+                    scheduleLoadEcsDiskOptions();
                 };
 
                 const closeCreateEcsModal = () => {
                     if (ecsCreating.value) return;
                     showCreateEcsModal.value = false;
                     ecsCreateDraft.value = createDefaultEcsDraft();
+                    resetDiskOptions();
                     ecsCreatePreview.value = null;
                     ecsCreateConfirmed.value = false;
                     ecsCreateResult.value = null;
@@ -3747,6 +4027,64 @@
                     showCredentialModal.value = false;
                     ecsCredentialResult.value = null;
                     credentialSavedAck.value = false;
+                };
+
+                let diskOptionTimer = null;
+                const resetDiskOptions = (hint = '请选择账号并填写实例规格后获取硬盘类型。') => {
+                    ecsDiskCategoryOptions.value = [];
+                    ecsDiskHint.value = hint;
+                };
+
+                const loadEcsDiskOptions = async () => {
+                    const account = selectedCreateAccount.value;
+                    if (!showCreateEcsModal.value || ecsCreatePreview.value) return;
+                    if (!account || !ecsCreateDraft.value.instanceType) {
+                        resetDiskOptions();
+                        return;
+                    }
+
+                    ecsCreateDraft.value.regionId = account.regionId || '';
+                    ecsDiskLoading.value = true;
+                    try {
+                        const res = await fetch('index.php?action=get_ecs_disk_options', {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                accountGroupKey: ecsCreateDraft.value.accountGroupKey,
+                                regionId: ecsCreateDraft.value.regionId,
+                                instanceType: ecsCreateDraft.value.instanceType
+                            })
+                        });
+                        const json = await res.json();
+                        if (!res.ok || !json.success) {
+                            resetDiskOptions(json.message || '硬盘类型获取失败，请检查实例规格。');
+                            return;
+                        }
+
+                        const options = json.data?.options || [];
+                        ecsDiskCategoryOptions.value = options;
+                        if (options.length === 0) {
+                            resetDiskOptions('当前规格没有返回可用硬盘类型，请更换实例规格。');
+                            return;
+                        }
+
+                        if (!options.some((item) => item.value === ecsCreateDraft.value.systemDiskCategory)) {
+                            ecsCreateDraft.value.systemDiskCategory = options[0].value;
+                        }
+
+                        ecsDiskHint.value = `来自阿里云 API：${getRegionName(json.data.regionId)} / ${json.data.zoneId}。`;
+                    } catch (error) {
+                        console.error('Fetch ECS disk options failed', error);
+                        resetDiskOptions('硬盘类型请求失败，请稍后重试。');
+                    } finally {
+                        ecsDiskLoading.value = false;
+                    }
+                };
+
+                const scheduleLoadEcsDiskOptions = () => {
+                    if (diskOptionTimer) {
+                        clearTimeout(diskOptionTimer);
+                    }
+                    diskOptionTimer = setTimeout(loadEcsDiskOptions, 450);
                 };
 
                 const resetCreateEcsPreview = () => {
@@ -3766,9 +4104,17 @@
                         openAlert('请填写实例规格，例如 ecs.e-c4m1.large', 'error');
                         return;
                     }
+                    ecsCreateDraft.value.regionId = account.regionId || '';
                     const diskSize = Number(ecsCreateDraft.value.systemDiskSize || 0);
                     if (!Number.isFinite(diskSize) || diskSize < 1) {
                         openAlert('系统盘大小请填写大于 0 的整数，具体范围会在下一步由阿里云 API 校验。', 'error');
+                        return;
+                    }
+                    if (ecsDiskCategoryOptions.value.length === 0) {
+                        await loadEcsDiskOptions();
+                    }
+                    if (!ecsCreateDraft.value.systemDiskCategory || ecsDiskCategoryOptions.value.length === 0) {
+                        openAlert('当前账号区域和实例规格没有可用硬盘类型，请更换实例规格后重试。', 'error');
                         return;
                     }
 
@@ -3776,10 +4122,7 @@
                     try {
                         const res = await fetch('index.php?action=preview_ecs_create', {
                             method: 'POST',
-                            body: JSON.stringify({
-                                ...ecsCreateDraft.value,
-                                regionId: account.regionId
-                            })
+                            body: JSON.stringify(ecsCreateDraft.value)
                         });
                         const data = await res.json();
                         if (!res.ok || !data.success) {
@@ -3930,8 +4273,10 @@
                     isAdmin.value = false;
                     currentMenu.value = 'status';
                     config.value = createDefaultConfig();
+                    configBaseline.value = '';
                     allInstances.value = [];
                     stopLogPolling();
+                    stopManagePolling();
                 };
 
                 const performSetup = async () => {
@@ -3980,6 +4325,7 @@
                             criticalError.value = data.error;
                             return;
                         }
+                        config.value.AppBrand.logo_url = data.brand?.logo_url || '';
                         initialized.value = !!data.initialized;
                         if (initialized.value) {
                             await checkLoginStatus();
@@ -4037,6 +4383,9 @@
 
                     if (menu === 'manage' && isAdmin.value) {
                         await fetchAllInstances(false);
+                        startManagePolling();
+                    } else {
+                        stopManagePolling();
                     }
 
                     if (menu === 'logs' && isAdmin.value) {
@@ -4053,12 +4402,33 @@
                     } else {
                         statusInstances.value = [];
                         stopStatusPolling();
+                        stopManagePolling();
                     }
                 });
 
                 watch(() => ecsCreateDraft.value.accountGroupKey, () => {
                     if (selectedCreateAccount.value) {
                         ecsCreateDraft.value.regionId = selectedCreateAccount.value.regionId || '';
+                    }
+                    resetDiskOptions();
+                    scheduleLoadEcsDiskOptions();
+                    ecsCreatePreview.value = null;
+                    ecsCreateConfirmed.value = false;
+                    ecsCreateResult.value = null;
+                });
+
+                watch(() => ecsCreateDraft.value.instanceType, () => {
+                    resetDiskOptions();
+                    scheduleLoadEcsDiskOptions();
+                    ecsCreatePreview.value = null;
+                    ecsCreateConfirmed.value = false;
+                    ecsCreateResult.value = null;
+                });
+
+                watch(() => ecsCreateDraft.value.systemDiskCategory, () => {
+                    const selected = ecsDiskCategoryOptions.value.find((item) => item.value === ecsCreateDraft.value.systemDiskCategory);
+                    if (selected) {
+                        ecsDiskHint.value = '来自阿里云 API。';
                     }
                     ecsCreatePreview.value = null;
                     ecsCreateConfirmed.value = false;
@@ -4072,12 +4442,17 @@
                 onUnmounted(() => {
                     stopLogPolling();
                     stopStatusPolling();
+                    stopManagePolling();
+                    if (diskOptionTimer) {
+                        clearTimeout(diskOptionTimer);
+                    }
                 });
 
                 return {
                     aliyunRegions,
                     allInstances,
                     config,
+                    brandLogoUrl,
                     cronWarning,
                     criticalError,
                     currentLogTab,
@@ -4097,6 +4472,7 @@
                     loadingCheckInit,
                     logAutoRefresh,
                     menuItems,
+                    settingsDirty,
                     manageFilter,
                     accountOptions,
                     passwordInput,
@@ -4111,8 +4487,11 @@
                     credentialSavedAck,
                     ecsCreating,
                     ecsOsOptions,
+                    ecsDiskLoading,
+                    ecsDiskCategoryOptions,
+                    ecsDiskCategorySelectOptions,
+                    ecsDiskHint,
                     ecsPreviewing,
-                    selectedCreateAccountRegionName,
                     showCreateEcsModal,
                     sendingEmail,
                     setupData,
@@ -4123,6 +4502,7 @@
                     systemLogs,
                     testingTelegram,
                     testingWebhook,
+                    uploadingLogo,
                     checkingLogin,
                     closeAccountModal,
                     dialogState,
@@ -4167,6 +4547,8 @@
                     deleteInstance,
                     removeAccountRow,
                     saveConfig,
+                    uploadLogo,
+                    clearLogo,
                     sendTestEmail,
                     sendTestTelegram,
                     sendTestWebhook,

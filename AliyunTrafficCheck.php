@@ -65,6 +65,17 @@ class AliyunTrafficCheck
         return $key;
     }
 
+    public function getPublicBrand()
+    {
+        if ($this->initError) {
+            return ['logo_url' => ''];
+        }
+
+        return [
+            'logo_url' => $this->configManager->get('app_logo_url', '')
+        ];
+    }
+
     public function login($password)
     {
         $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
@@ -176,6 +187,59 @@ class AliyunTrafficCheck
         return $success;
     }
 
+    public function uploadLogo(array $file)
+    {
+        if ($this->initError) {
+            return ['success' => false, 'message' => $this->initError];
+        }
+
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            return ['success' => false, 'message' => 'Logo 上传失败，请重新选择图片'];
+        }
+
+        if (($file['size'] ?? 0) <= 0 || ($file['size'] ?? 0) > 2 * 1024 * 1024) {
+            return ['success' => false, 'message' => 'Logo 图片大小需小于 2MB'];
+        }
+
+        $tmp = $file['tmp_name'] ?? '';
+        if ($tmp === '' || !is_uploaded_file($tmp)) {
+            return ['success' => false, 'message' => 'Logo 文件无效'];
+        }
+
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = $finfo->file($tmp);
+        $allowed = [
+            'image/png' => 'png',
+            'image/jpeg' => 'jpg',
+            'image/webp' => 'webp'
+        ];
+
+        if (!isset($allowed[$mime])) {
+            return ['success' => false, 'message' => '仅支持 PNG、JPG、WebP 图片'];
+        }
+
+        $dir = __DIR__ . '/data';
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+            return ['success' => false, 'message' => 'Logo 存储目录不可写'];
+        }
+
+        foreach (glob($dir . '/brand-logo.*') ?: [] as $oldFile) {
+            @unlink($oldFile);
+        }
+
+        $target = $dir . '/brand-logo.' . $allowed[$mime];
+        if (!@move_uploaded_file($tmp, $target)) {
+            return ['success' => false, 'message' => 'Logo 保存失败，请检查 data 目录权限'];
+        }
+
+        @chmod($target, 0644);
+        $url = 'index.php?action=brand_logo&v=' . filemtime($target);
+        $this->configManager->updateAppLogoUrl($url);
+        $this->db->addLog('info', '页面 Logo 已更新');
+
+        return ['success' => true, 'url' => $url];
+    }
+
     public function getConfigForFrontend()
     {
         if ($this->initError)
@@ -196,6 +260,9 @@ class AliyunTrafficCheck
             'monthly_auto_start' => ($settings['monthly_auto_start'] ?? '0') === '1',
             'api_interval' => (int) ($settings['api_interval'] ?? 600),
             'enable_billing' => ($settings['enable_billing'] ?? '0') === '1',
+            'AppBrand' => [
+                'logo_url' => $settings['app_logo_url'] ?? ''
+            ],
             'Notification' => [
                 'email_enabled' => ($settings['notify_email_enabled'] ?? '1') === '1',
                 'email' => $settings['notify_email'] ?? '',
@@ -578,6 +645,8 @@ class AliyunTrafficCheck
             $snap = $this->buildInstanceSnapshot($account, $threshold, $userInterval, $billingEnabled, $includeSensitive);
             $snap['instanceStatus'] = 'Releasing';
             $snap['status'] = 'Releasing';
+            $snap['operationLocked'] = true;
+            $snap['operationLockedReason'] = '实例正在释放中，后台队列会继续处理。';
             $data[] = $snap;
         }
 
@@ -800,6 +869,24 @@ class AliyunTrafficCheck
             'summary' => $preview,
             'pricing' => $preview['pricing'],
             'warnings' => $preview['warnings']
+        ];
+    }
+
+    public function getEcsDiskOptions($data)
+    {
+        if ($this->initError) {
+            throw new Exception($this->initError);
+        }
+
+        $groupKey = trim((string) ($data['accountGroupKey'] ?? ''));
+        if ($groupKey === '') {
+            throw new Exception('请选择用于创建 ECS 的账号');
+        }
+
+        $account = $this->resolveAccountGroupForCreate($groupKey, $data['regionId'] ?? '');
+        return [
+            'success' => true,
+            'data' => $this->aliyunService->getAvailableSystemDiskOptions($account, $data)
         ];
     }
 
@@ -1601,6 +1688,8 @@ class AliyunTrafficCheck
             $snap = $this->buildInstanceSnapshot($account, $threshold, $userInterval, false, true, $sync);
             $snap['instanceStatus'] = 'Releasing';
             $snap['status'] = 'Releasing';
+            $snap['operationLocked'] = true;
+            $snap['operationLockedReason'] = '实例正在释放中，后台队列会继续处理。';
             $allInstances[] = $snap;
         }
 

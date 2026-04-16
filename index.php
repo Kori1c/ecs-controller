@@ -24,7 +24,10 @@ if ($action === 'check_init') {
     if ($initError) {
         echo json_encode(['initialized' => false, 'error' => $initError]);
     } else {
-        echo json_encode(['initialized' => $app->isInitialized()]);
+        echo json_encode([
+            'initialized' => $app->isInitialized(),
+            'brand' => $app->getPublicBrand()
+        ]);
     }
     exit;
 }
@@ -71,6 +74,31 @@ if ($action === 'check_login') {
     exit;
 }
 
+if ($action === 'brand_logo') {
+    $dir = __DIR__ . '/data';
+    $files = array_merge(
+        glob($dir . '/brand-logo.png') ?: [],
+        glob($dir . '/brand-logo.jpg') ?: [],
+        glob($dir . '/brand-logo.webp') ?: []
+    );
+    $file = $files[0] ?? '';
+    if ($file === '' || !is_file($file)) {
+        http_response_code(404);
+        exit;
+    }
+
+    $mimeMap = [
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'webp' => 'image/webp'
+    ];
+    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    header('Content-Type: ' . ($mimeMap[$ext] ?? 'application/octet-stream'));
+    header('Cache-Control: public, max-age=86400');
+    readfile($file);
+    exit;
+}
+
 if ($action === 'get_status') {
     header('Content-Type: application/json; charset=utf-8');
     $initError = $app->getInitError();
@@ -108,6 +136,12 @@ if ($action === 'save_config') {
     } else {
         echo json_encode(['success' => false, 'message' => '保存失败']);
     }
+    exit;
+}
+
+if ($action === 'upload_logo') {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($app->uploadLogo($_FILES['logo'] ?? []));
     exit;
 }
 
@@ -206,6 +240,19 @@ if ($action === 'preview_ecs_create') {
             'created_at' => time()
         ];
         echo json_encode($result);
+    } catch (Exception $e) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+if ($action === 'get_ecs_disk_options') {
+    header('Content-Type: application/json; charset=utf-8');
+    $data = json_decode(file_get_contents('php://input'), true) ?: [];
+
+    try {
+        echo json_encode($app->getEcsDiskOptions($data));
     } catch (Exception $e) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
