@@ -92,8 +92,16 @@ class Database
             traffic_used REAL DEFAULT 0,
             instance_status TEXT DEFAULT 'Unknown',
             updated_at INTEGER DEFAULT 0,
-            last_keep_alive_at INTEGER DEFAULT 0
+            last_keep_alive_at INTEGER DEFAULT 0,
+            is_deleted INTEGER DEFAULT 0
         )");
+
+        // 向下兼容：自动补充新增字段
+        try {
+            $this->pdo->exec("ALTER TABLE accounts ADD COLUMN is_deleted INTEGER DEFAULT 0");
+        } catch (PDOException $e) {
+            // 忽略字段已存在错误
+        }
 
         $this->pdo->exec("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, message TEXT, created_at INTEGER)");
 
@@ -132,12 +140,66 @@ class Database
             UNIQUE(account_id, cache_type, billing_cycle)
         )");
 
+        // ECS 公网出口流量累计账本。CDT/账单接口有延迟且偏账号聚合，这里按实例和自然月保存云监控分钟采样的累计结果。
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS instance_traffic_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_id INTEGER NOT NULL,
+            instance_id TEXT NOT NULL,
+            billing_month TEXT NOT NULL,
+            traffic_bytes REAL DEFAULT 0,
+            last_sample_ms INTEGER DEFAULT 0,
+            updated_at INTEGER NOT NULL,
+            UNIQUE(account_id, instance_id, billing_month)
+        )");
+
+        $this->pdo->exec("CREATE TABLE IF NOT EXISTS ecs_create_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id TEXT UNIQUE NOT NULL,
+            preview_id TEXT DEFAULT '',
+            account_group_key TEXT NOT NULL,
+            region_id TEXT NOT NULL,
+            zone_id TEXT DEFAULT '',
+            instance_type TEXT NOT NULL,
+            image_id TEXT DEFAULT '',
+            os_label TEXT DEFAULT '',
+            instance_name TEXT DEFAULT '',
+            vpc_id TEXT DEFAULT '',
+            vswitch_id TEXT DEFAULT '',
+            security_group_id TEXT DEFAULT '',
+            internet_max_bandwidth_out INTEGER DEFAULT 0,
+            system_disk_category TEXT DEFAULT '',
+            system_disk_size INTEGER DEFAULT 0,
+            instance_id TEXT DEFAULT '',
+            public_ip TEXT DEFAULT '',
+            login_user TEXT DEFAULT '',
+            login_password TEXT DEFAULT '',
+            status TEXT NOT NULL,
+            step TEXT DEFAULT '',
+            error_message TEXT DEFAULT '',
+            payload TEXT DEFAULT '',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )");
+
         $this->ensureColumn('accounts', 'traffic_used', 'REAL DEFAULT 0');
+        $this->ensureColumn('accounts', 'traffic_billing_month', "TEXT DEFAULT ''");
         $this->ensureColumn('accounts', 'instance_status', "TEXT DEFAULT 'Unknown'");
         $this->ensureColumn('accounts', 'updated_at', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'last_keep_alive_at', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'auto_start_blocked', 'INTEGER DEFAULT 0');
         $this->ensureColumn('accounts', 'remark', "TEXT DEFAULT ''");
-        $this->ensureColumn('accounts', 'site_type', "TEXT DEFAULT 'china'");
+        $this->ensureColumn('accounts', 'site_type', "TEXT DEFAULT 'international'");
+        $this->ensureColumn('accounts', 'group_key', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'instance_name', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'instance_type', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'internet_max_bandwidth_out', 'INTEGER DEFAULT 0');
+        $this->ensureColumn('accounts', 'public_ip', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'private_ip', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'cpu', "INTEGER DEFAULT 0");
+        $this->ensureColumn('accounts', 'memory', "INTEGER DEFAULT 0");
+        $this->ensureColumn('accounts', 'os_name', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'stopped_mode', "TEXT DEFAULT ''");
+        $this->ensureColumn('accounts', 'health_status', "TEXT DEFAULT 'Unknown'");
 
         $this->migrateStatsToAccountId();
     }
@@ -383,6 +445,41 @@ class Database
 
         $dayLimit = time() - (60 * 86400);
         $this->pdo->exec("DELETE FROM traffic_daily WHERE recorded_at < $dayLimit");
+
+        $monthLimit = date('Y-m', strtotime('-4 months'));
+        $stmt = $this->pdo->prepare("DELETE FROM instance_traffic_usage WHERE billing_month < ?");
+        $stmt->execute([$monthLimit]);
+    }
+
+    public function getInstanceTrafficUsage($accountId, $instanceId, $billingMonth)
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM instance_traffic_usage WHERE account_id = ? AND instance_id = ? AND billing_month = ? LIMIT 1");
+        $stmt->execute([$accountId, $instanceId, $billingMonth]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    }
+
+    public function upsertInstanceTrafficUsage($accountId, $instanceId, $billingMonth, $trafficBytes, $lastSampleMs)
+    {
+        $stmt = $this->pdo->prepare("
+            INSERT INTO instance_traffic_usage (account_id, instance_id, billing_month, traffic_bytes, last_sample_ms, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(account_id, instance_id, billing_month)
+            DO UPDATE SET
+                traffic_bytes = excluded.traffic_bytes,
+                last_sample_ms = excluded.last_sample_ms,
+                updated_at = excluded.updated_at
+        ");
+
+        return $stmt->execute([
+            $accountId,
+            $instanceId,
+            $billingMonth,
+            max(0, (float) $trafficBytes),
+            max(0, (int) $lastSampleMs),
+            time()
+        ]);
     }
 
     // --- 账单缓存相关方法 ---
@@ -420,5 +517,69 @@ class Database
     {
         $limit = time() - (90 * 86400);
         $this->pdo->exec("DELETE FROM billing_cache WHERE updated_at < $limit");
+    }
+
+    public function createEcsCreateTask($taskId, $previewId, $groupKey, $regionId, $instanceType, $payload)
+    {
+        $stmt = $this->pdo->prepare("
+            INSERT INTO ecs_create_tasks (
+                task_id, preview_id, account_group_key, region_id, instance_type, status, step, payload, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ");
+
+        $now = time();
+        $stmt->execute([
+            $taskId,
+            $previewId,
+            $groupKey,
+            $regionId,
+            $instanceType,
+            'running',
+            '初始化创建任务',
+            json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            $now,
+            $now
+        ]);
+    }
+
+    public function updateEcsCreateTask($taskId, array $fields)
+    {
+        if (empty($fields)) {
+            return false;
+        }
+
+        $fields['updated_at'] = time();
+        $allowed = [
+            'zone_id', 'image_id', 'os_label', 'instance_name', 'vpc_id', 'vswitch_id',
+            'security_group_id', 'internet_max_bandwidth_out', 'system_disk_category',
+            'system_disk_size', 'instance_id', 'public_ip', 'login_user', 'login_password',
+            'status', 'step', 'error_message', 'payload', 'updated_at'
+        ];
+
+        $sets = [];
+        $values = [];
+        foreach ($fields as $key => $value) {
+            if (!in_array($key, $allowed, true)) {
+                continue;
+            }
+            $sets[] = "$key = ?";
+            $values[] = is_array($value) ? json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : $value;
+        }
+
+        if (empty($sets)) {
+            return false;
+        }
+
+        $values[] = $taskId;
+        $stmt = $this->pdo->prepare("UPDATE ecs_create_tasks SET " . implode(', ', $sets) . " WHERE task_id = ?");
+        return $stmt->execute($values);
+    }
+
+    public function getEcsCreateTask($taskId)
+    {
+        $stmt = $this->pdo->prepare("SELECT * FROM ecs_create_tasks WHERE task_id = ? LIMIT 1");
+        $stmt->execute([$taskId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
     }
 }

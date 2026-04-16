@@ -1,189 +1,143 @@
-# CDT-Monitor 🌩️
+# ecs-controller 🌩️
 
-> **阿里云 CDT 流量监控与自动化熔断解决方案**
+<p align="center">
+  <img src="./icon.png" width="120" height="120" alt="ecs-controller Logo">
+</p>
+
+> **阿里云 CDT 流量监控与自动化管理终极解决方案**
 > 
-> 旨在通过集成流量追踪、阈值熔断机制及抢占式实例保活策略，优化云端资源成本管理。
+> 专为 **MJJ** 大佬设计。旨在最大化榨干阿里云 CDT 200GB 免费流量，集成流量实时监控、自动熔断保护、抢占式实例保活、**实例规格与价格透明展示**于一体。
 
-## 📖 项目概述 (Introduction)
+## ⚠️ 免责声明
 
-**CDT-Monitor** 是一款专为阿里云云数据传输（CDT）用户研发的轻量级流量监控与管理系统。该系统基于 **PHP** 与 **SQLite** 架构设计，无需复杂的数据库配置即可快速部署。
+1. **配置参考**：本项目提供的默认一键创建配置仅供参考，请在下单前务必核对阿里云最新的 API 返回价格。
+2. **代码修改**：代码完全开源，您可以根据个人需求自行修改逻辑或 UI。
+3. **AI 开发声明**：本项目由 **AI (Antigravity)** 深度参与开发。作者已尽最大努力确保核心功能（如流量熔断、自动释放）的逻辑正确性。
+4. **Bug 修复**：由于云平台 API 变动或环境差异，如遇见 Bug 建议先行尝试自行修复，或提交 **Issue / PR**，由于精力有限，作者不保证实时维护。
+5. **风险自担**：因使用本脚本、或是阿里云 API 异常导致的相关资源损失或超支费用，作者概不负责。
 
-其核心价值在于自动化解决云资源管理中的“黑天鹅”事件：**通过实时流量熔断机制防止 CDT 免费额度超支扣费，利用智能保活算法解决抢占式实例非预期释放导致的业务中断，并提供精准的定时任务调度，是个人开发者与中小团队控制云成本的理想管家。**
-
-## 📸 界面预览 (Interface Preview)
-
-| 登陆界面 | 初始化 |
-| --- | --- |
-| ![https://assets.qninq.cn/qning/tzONAKQq.webp](https://assets.qninq.cn/qning/tzONAKQq.webp) | ![https://assets.qninq.cn/qning/xDFaQTTX.webp](https://assets.qninq.cn/qning/xDFaQTTX.webp) |
-
-| 后台页面 | 后台页面 |
-| --- | --- |
-| ![https://assets.qninq.cn/qning/WQG9I8qC.webp](https://assets.qninq.cn/qning/WQG9I8qC.webp) | ![https://assets.qninq.cn/qning/ipOStKeK.webp](https://assets.qninq.cn/qning/ipOStKeK.webp) |
-
-| 图表展示 | 邮件展示 |
-| --- | --- |
-| ![https://assets.qninq.cn/qning/a5zqmuJQ.webp](https://assets.qninq.cn/qning/a5zqmuJQ.webp) | ![https://assets.qninq.cn/qning/6KEjK7bw.webp](https://assets.qninq.cn/qning/6KEjK7bw.webp) |
-## ✨ 核心功能 (Core Features)
-
-* **便捷部署架构** ：基于 SQLite 构建，无需配置 MySQL 或 Redis 等外部数据库，支持数据私有化存储与快速部署。
-* **多账户聚合监控** ：提供统一管理面板，实现对多个阿里云账户下 CDT 流量使用情况及实例运行状态的集中监控。
-* **流量熔断机制** ：
-  * **阈值控制** ：支持自定义流量使用阈值（例如 95%）。
-  * **自动化停机** ：当流量超出预设阈值时自动触发实例停机，支持配置 **普通停机** 或 **节省停机（停止计费）** 模式。
-  * **告警通知** ：集成 SMTP 协议，支持通过邮件发送即时告警通知。
-* **实例保活策略** ：内置保活逻辑算法，旨在防止抢占式实例在预定运行时间段内被异常回收。
-* **定时任务管理** ：支持针对特定实例设定每日自动开关机计划。
-* **现代化用户界面** ：采用原生 Tailwind CSS 构建，提供统一的响应式布局，确保移动端与桌面端的兼容性与视觉一致性。
-* **安全保障体系** ：内置初始化配置向导，确保敏感配置信息的本地加密存储与安全性。
-
-## 🛠️ 环境要求 (System Requirements)
-
-* **PHP** 版本 >= 8.0
-* **Composer** 依赖管理工具
-* **PHP 扩展** ：`pdo_sqlite`, `curl`, `json`
-* **Web 服务器** ：Nginx / Apache / OpenLiteSpeed
-
-## 🚀 安装指南 (Installation Guide)
-
-### 1. 获取源代码
-
-```
-git clone https://github.com/wang4386/CDT-Monitor.git
-cd CDT-Monitor
-```
-
-### 2. 安装依赖包
-
-```
-composer install --no-dev
-```
-
-### 3. 配置目录权限
-
-请确保 Web 服务器用户对项目根目录及 `data.sqlite` 文件拥有 **写入权限** 。
-
-```
-# 示例：假设 Web 根目录为 /www/wwwroot/yoursite.com
-chown -R www:www /www/wwwroot/yoursite.com
-chmod -R 755 /www/wwwroot/yoursite.com
-```
-
-> **🛡️ Nginx 安全配置（重要）**
-> 
-> 为防止数据库文件被下载，请务必在 Nginx 配置文件（server 段）中添加以下伪静态规则以禁止访问 `/data/` 目录：
-> 
-> ```
-> location ^~ /data/ {
->     deny all;
->     return 403;
-> }
-> ```
-
-### 4. 系统初始化
-
-通过浏览器访问站点（例如 `https://monitor.yourdomain.com`）。首次访问将自动进入  **初始化向导** ，请按照提示完成管理员密码及相关参数的配置。
-
-## 🐳 Docker 部署 (Docker Deployment)
-
-无需配置 PHP 环境，直接使用 Docker 即可快速部署。Docker 版本已内置定时任务，**无需** 额外配置 Crontab。
+---
+## 🚀 快速部署
 
 ### 方式一：Docker Compose (推荐)
+这是最省心的部署方案，内置了自动化的定时任务巡检，无需额外配置 Crontab。
 
-创建一个 `docker-compose.yml` 文件：
-
-```
+1. **新建配置文件** `docker-compose.yml`：
+```yaml
 services:
-  cdt-monitor:
-    image: qninq/cdt-monitor:latest
-    # build: .
-    container_name: cdt-monitor
+  ecs-controller:
+    image: kori1c/ecs-controller:latest
+    container_name: ecs-controller
     restart: always
     ports:
-      - "43210:80"  # 将容器的 80 端口映射到宿主机的 43210 端口
+      - "43210:80"
     volumes:
-      # 持久化数据目录，确保重启后配置和数据库不丢失
       - ./data:/var/www/html/data
-      # 可选：如果你想查看 Docker 内部的日志
-      # - ./logs:/var/log/nginx
     environment:
-      - TZ=Asia/Shanghai  # 设置时区，对 Cron 任务很重要
+      - TZ=Asia/Shanghai
 ```
 
-启动服务：
-
-```
+2. **启动服务**：
+```bash
 docker-compose up -d
 ```
+访问 `http://localhost:43210` 即可开始使用。
 
-### 方式二：Docker CLI
+---
 
-```
-docker run -d \
-    --name cdt-monitor \
-    --restart always \
-    -p 43210:80 \
-    -v $(pwd)/data:/var/www/html/data \
-    -e TZ=Asia/Shanghai \
-    qninq/cdt-monitor:latest
-```
+## 🔑 获取阿里云密钥
 
-部署完成后，访问 `http://服务器IP:43210` 即可开始使用。
+为了让系统能够正常获取流量数据并管理实例，您需要准备具有相关权限的阿里云 AccessKey：
 
-## ⚙️ 自动化任务配置 (Automation Setup)
+1. **登录阿里云控制台**，前往 [RAM 访问控制 - 用户](https://ram.console.aliyun.com/users)。
+2. **创建用户**：点击“创建用户”，勾选“OpenAPI 调用访问”。
+3. **获取密钥**：保存好生成的 `AccessKey ID` 和 `AccessKey Secret`。
+4. **添加权限**：为该用户添加以下三个权限策略（必须包含）：
+   - `AliyunECSFullAccess`：用于查看实例状态、开关机及释放。
+   - `AliyunBSSFullAccess`：用于查询账号余额及消费账单。
+   - `AliyunCDTFullAccess`：用于获取 CDT 流量实时统计信息。
 
-> **注意：** 如果您使用 Docker 部署，请跳过此步骤（容器已内置自动任务）。
+---
 
-CDT-Monitor 依赖定时任务以实现精确的流量监控与实例保活功能。建议执行频率为 **每分钟一次** 。
+## ✨ 核心功能
 
-您可以根据服务器环境选择以下任意一种方式：
 
-### 方式一：命令行 Crontab (推荐)
+### 🛡️ 流量盾牌 (CDT 监控)
+- **多账户聚合**：支持同时管理多个阿里云 AK/SK，多区域实例一屏尽览。
+- **自然月流量重置**：自动适配阿里云 CDT 计费周期，每月 1 号零点自动重置已用流量统计。
+- **熔断机制**：支持设定 **告警阈值 (如 95%)**，触发时自动执行关机动作。
+- **灵活关机模式**：可选 **普通停机 (KeepCharging)** 或 **节省停机 (StopCharging/释放计算资源停止计费)**。
 
-最稳定且高效的方式，适合有服务器 SSH 权限的用户。
+### ⚡ 自动化高阶管理
+- **异步安全释放**：彻底解决释放逻辑响应缓慢问题。点击后后台接管，自动执行“强制离线 -> 等待状态 -> 物理销毁”全流程，无需前台苦等。
+- **抢占式实例保活**：实时守护低成本 Spot 实例，检测到非预期停机时（如被回收）自动重试拉起。
+- **定时任务清单**：支持为指定实例设置每日定时开机、定时关机计划（自定义时间点）。
+- **ECS 快速创建**：支持从预设规格中一键拉起新实例（默认采用最低配置、最低价格方案），并自动配置安全组与防火墙规则。
+- **预检与成本预览**：创建前自动调用阿里云 API 进行库存预检与其费用估算，拒绝盲目下单。
+- **初次登录信息保护**：针对新建实例，系统仅在创建成功的瞬间展示初始密码，确保 AK/SK 与凭据安全。
+- **DDNS 联动**：深度集成 **Cloudflare**，实例重启 IP 变更后自动同步 A 记录。
 
-```
-# CDT-Monitor 核心任务
-* * * * * /usr/bin/php /path/to/your/project/monitor.php > /dev/null 2>&1
-```
+### 📊 成本与审计
+- **费用中心**：实时拉取账号 **可用余额**，并预估当月实例已产生账单金额。
+- **实时日志审计**：详细记录系统心跳、API 调用状态、告警触发记录，支持分级清理，保证系统轻量运行。
+- **一键同步**：支持主动从阿里云云端同步最新机器规格、状态、公网 IP 等所有属性。
 
-> **注意** ：请将路径替换为实际的项目部署路径，并确保使用 PHP CLI 版本执行。
+### 📢 预警系统
+- **多通路覆盖**：集成 **Telegram (纸飞机)**、**SMTP 邮件** 及 **通用 Webhook** 接口。
+- **状态变更通知**：实例关机、启动、释放成功、流量超标时均会发送详尽的富文本通知。
 
-### 方式二：URL 监控 (Web Cron)
+---
 
-如果您使用虚拟主机或希望通过第三方监控服务（如 UptimeRobot, 宝塔计划任务-访问URL）来触发，可以使用此方式。
+## 💡 省钱小秘籍 (Saving Tips)
 
-**监控地址格式：**
+- **流量熔断**：系统默认检测到流量即将用尽时自动关机（建议配合“节省停机”模式），确保不产生额外扣费，真正做到“用完即止”。
+- **折扣充值**：本项目可搭配 [portal.acm.ee](https://portal.acm.ee/) 使用，享受阿里云七折充值优惠，叠加 CDT 200GB 免费流量，实现在线极致性价比。
 
-```
-https://您的域名/monitor.php?key=您的管理员密码
-```
+---
 
-> **注意** ：
-> 
-> 1. 为了安全起见，Web 访问必须携带 `key` 参数，该参数值即为您初始化时设置的 **管理员密码** 。
-> 2. 如果密码错误，系统将返回 403 禁止访问。
+## 📸 界面预览
 
-无论使用哪种方式，`monitor.php` 均内置了智能缓存机制，高频执行不会导致 API 调用额度的过度消耗。
+### 汇总监控
+![监控状态](./image/截屏2026-04-16%2012.15.51.png)
 
-## 💡 功能详解 (Advanced Documentation)
+### 系统配置
+![系统设置](./image/截屏2026-04-16%2012.16.12.png)
 
-### 停机模式说明
+### 实例生命周期管理
+![创建结果展示](./image/截屏2026-04-16%2011.24.14.png)
 
-* **普通停机 (KeepCharging)** ：停止实例后保留计算资源与 IP 地址，持续产生费用，具备快速启动特性。
-* **节省停机 (StopCharging)** ：释放计算资源并停止计费。**注意：固定公网 IP 地址可能会在重启后发生变更，但弹性公网 IP (EIP) 地址保持不变。建议用于成本控制场景。**
+---
 
-### 抢占式实例保活机制
 
-该机制专为**抢占式实例**设计。系统激活后，将实时监控处于“预定运行时间段”内的实例状态。若检测到非预期的关机状态（如被云平台释放），系统将尝试自动重启实例以维持服务可用性。
 
-* *注：为防止状态频繁震荡，触发保活操作后将执行 30 分钟的冷却期。*
+## 🛠️ 技术架构
 
-## 🤝 参与贡献 (Contributing)
+- **Backend**: 原生 PHP 8.1+，无框架依赖，追求极致性能。
+- **Database**: SQLite 3 (WAL 模式)，兼顾轻量与读写并发。
+- **Frontend**: Vue 3.x (SFC 理念) + 原生 Vanilla CSS。
+- **SDK**: Alibaba Cloud SDK for PHP (V1)。
 
-欢迎提交 Issue 或 Pull Request 以协助改进本项目。
+---
 
-## 📄 开源协议 (License)
+## ☕ 赏杯咖啡 (Donation)
 
-本项目遵循 [MIT License](https://mit-license.org/ "null") 开源协议。
+如果您觉得这个工具对您有帮助，阔佬随手赏杯咖啡：
 
-<p align="center">Created by <a href="https://qninq.cn/">青柠·倾城于你</a></p>
+- **USDT-TRC20**: `TMBmXngHcKtNo9nLxTCJcGTfNutsbb9rp3`
+- **USDT-Polygon**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
+- **USDT-BSC**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
+- **USDT-ERC20**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
+- **USDT-ArbitrumOne**: `0x846ad38ed7159aee70b0ebd8ec39ad2d7b32835b`
+
+---
+
+
+
+
+## 📄 许可协议
+
+本项目遵循 [MIT License](https://opensource.org/licenses/MIT) 开源协议。
+
+---
+<p align="center">Made with ❤️ for Aliyun Users</p>
+<p align="center">Based on <a href="https://github.com/wang4386/CDT-Monitor">CDT-Monitor</a></p>

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-echo "Starting CDT-Monitor..."
+echo "Starting ECS-Controller..."
 
 # 1. 确保数据目录权限正确
 # Docker 挂载卷时可能会导致权限归属为 root，这里强制修正为 www-data

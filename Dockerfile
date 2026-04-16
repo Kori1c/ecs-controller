@@ -8,7 +8,9 @@ WORKDIR /app
 COPY composer.json composer.lock ./
 
 # 安装依赖 (排除开发依赖，优化自动加载)
-RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs --no-interaction --no-scripts
+# 注意：SDK Sign::uuid() 的 microtime() 返回带空格的字符串导致签名失败，需修复
+RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs --no-interaction --no-scripts \
+    && sed -i 's/return md5(\$salt . uniqid(md5(microtime(true)), true)) . microtime();/return md5(\$salt . uniqid(md5(microtime(true)), true)) . str_replace(" ", "", microtime());/' /app/vendor/alibabacloud/client/src/Support/Sign.php
 
 # 复制其余项目文件
 COPY . .
@@ -20,7 +22,7 @@ COPY . .
 FROM php:8.2-fpm-alpine
 
 # 设置镜像元数据
-LABEL maintainer="CDT-Monitor-Docker"
+LABEL maintainer="ECS-Controller-Docker"
 
 # 设置环境变量
 ENV TZ=Asia/Shanghai

@@ -6,6 +6,10 @@ use AlibabaCloud\Client\Exception\ServerException;
 
 class AliyunService
 {
+    private $regionCache = [];
+    private $managedTagKey = 'ecs-controller-managed';
+    private $managedTagValue = 'true';
+
     /**
      * 智能重试执行器
      * 自动处理网络抖动、超时和服务端临时错误
@@ -72,6 +76,23 @@ class AliyunService
     }
 
     private $trafficCache = [];
+
+    private function setDefaultClient($key, $secret, $regionId)
+    {
+        AlibabaCloud::accessKeyClient($key, $secret)
+            ->regionId($regionId)
+            ->asDefaultClient();
+    }
+
+    private function ecsHost($regionId)
+    {
+        return "ecs.{$regionId}.aliyuncs.com";
+    }
+
+    private function vpcHost($regionId)
+    {
+        return "vpc.{$regionId}.aliyuncs.com";
+    }
 
     /**
      * 判断是否为海外区域
@@ -165,6 +186,170 @@ class AliyunService
     }
 
     /**
+     * 获取 ECS 实例公网出口分钟带宽点，并换算为字节增量。
+     * 阿里云 ECS 公网按出方向流量计费；这里优先使用 VPC 公网 IP 维度指标，经典网络回退到实例维度指标。
+     *
+     * @return array ['bytes' => float, 'lastSampleMs' => int, 'points' => int, 'metric' => string]
+     * @throws \Exception
+     */
+    public function getInstanceOutboundTrafficDelta($account, $startMs, $endMs)
+    {
+        if (empty($account['instance_id'])) {
+            throw new \Exception('未配置 Instance ID');
+        }
+
+        if ($endMs <= $startMs) {
+            return [
+                'bytes' => 0.0,
+                'lastSampleMs' => (int) $startMs,
+                'points' => 0,
+                'metric' => ''
+            ];
+        }
+
+        $metricCandidates = [];
+        $publicIp = trim((string) ($account['public_ip'] ?? ''));
+        if ($publicIp !== '') {
+            $metricCandidates[] = [
+                'name' => 'VPC_PublicIP_InternetOutRate',
+                'dimensions' => [[
+                    'instanceId' => $account['instance_id'],
+                    'ip' => $publicIp
+                ]]
+            ];
+        }
+
+        $metricCandidates[] = [
+            'name' => 'InternetOutRate',
+            'dimensions' => [[
+                'instanceId' => $account['instance_id']
+            ]]
+        ];
+
+        $lastException = null;
+        foreach ($metricCandidates as $candidate) {
+            try {
+                $result = $this->queryMetricRateAsBytes(
+                    $account['access_key_id'],
+                    $account['access_key_secret'],
+                    $candidate['name'],
+                    $candidate['dimensions'],
+                    $startMs,
+                    $endMs
+                );
+
+                if ($result['points'] > 0 || $candidate['name'] === 'InternetOutRate') {
+                    $result['metric'] = $candidate['name'];
+                    return $result;
+                }
+            } catch (\Exception $e) {
+                $lastException = $e;
+            }
+        }
+
+        if ($lastException) {
+            throw $lastException;
+        }
+
+        return [
+            'bytes' => 0.0,
+            'lastSampleMs' => (int) $startMs,
+            'points' => 0,
+            'metric' => ''
+        ];
+    }
+
+    private function queryMetricRateAsBytes($key, $secret, $metricName, array $dimensions, $startMs, $endMs)
+    {
+        $period = 60;
+        $chunkMs = 24 * 3600 * 1000;
+        $cursor = (int) $startMs;
+        $totalBytes = 0.0;
+        $lastSampleMs = (int) $startMs;
+        $pointCount = 0;
+
+        while ($cursor < $endMs) {
+            $chunkEnd = min($cursor + $chunkMs, (int) $endMs);
+            $nextToken = null;
+
+            do {
+                $query = [
+                    'Namespace' => 'acs_ecs_dashboard',
+                    'MetricName' => $metricName,
+                    'Period' => (string) $period,
+                    'StartTime' => (string) $cursor,
+                    'EndTime' => (string) $chunkEnd,
+                    'Dimensions' => json_encode($dimensions, JSON_UNESCAPED_SLASHES),
+                    'Length' => '1440'
+                ];
+
+                if (!empty($nextToken)) {
+                    $query['NextToken'] = $nextToken;
+                }
+
+                $result = $this->executeWithRetry(function () use ($key, $secret, $query) {
+                    AlibabaCloud::accessKeyClient($key, $secret)
+                        ->regionId('cn-hangzhou')
+                        ->asDefaultClient();
+
+                    return AlibabaCloud::rpc()
+                        ->product('Cms')
+                        ->scheme('https')
+                        ->version('2019-01-01')
+                        ->action('DescribeMetricList')
+                        ->method('POST')
+                        ->host('metrics.aliyuncs.com')
+                        ->options([
+                            'query' => $query,
+                            'connect_timeout' => 5.0,
+                            'timeout' => 15.0
+                        ])
+                        ->request();
+                }, 'queryMetricRateAsBytes');
+
+                $datapoints = $result['Datapoints'] ?? '[]';
+                if (is_string($datapoints)) {
+                    $datapoints = json_decode($datapoints, true);
+                }
+                if (!is_array($datapoints)) {
+                    $datapoints = [];
+                }
+
+                usort($datapoints, function ($a, $b) {
+                    return ((int) ($a['timestamp'] ?? 0)) <=> ((int) ($b['timestamp'] ?? 0));
+                });
+
+                foreach ($datapoints as $point) {
+                    $timestamp = (int) ($point['timestamp'] ?? 0);
+                    if ($timestamp <= $startMs || $timestamp > $endMs) {
+                        continue;
+                    }
+
+                    $rateBitsPerSecond = (float) ($point['Average'] ?? $point['Maximum'] ?? $point['Minimum'] ?? 0);
+                    if ($rateBitsPerSecond < 0) {
+                        $rateBitsPerSecond = 0;
+                    }
+
+                    $totalBytes += ($rateBitsPerSecond * $period) / 8;
+                    $lastSampleMs = max($lastSampleMs, $timestamp);
+                    $pointCount++;
+                }
+
+                $nextToken = $result['NextToken'] ?? null;
+            } while (!empty($nextToken));
+
+            $cursor = $chunkEnd;
+        }
+
+        return [
+            'bytes' => $totalBytes,
+            'lastSampleMs' => $lastSampleMs,
+            'points' => $pointCount,
+            'metric' => $metricName
+        ];
+    }
+
+    /**
      * 获取实例状态
      * @throws \Exception
      */
@@ -183,7 +368,8 @@ class AliyunService
             ];
 
             if (!empty($account['instance_id'])) {
-                $options['query']['InstanceId'] = $account['instance_id'];
+                // 修改：阿里云 RPC 风格接口对于列表类参数（如 InstanceId.N）需要明确的索引
+                $options['query']['InstanceId.1'] = $account['instance_id'];
             }
 
             $result = AlibabaCloud::rpc()
@@ -196,14 +382,107 @@ class AliyunService
                 ->options($options)
                 ->request();
 
-            if (isset($result['InstanceStatuses']['InstanceStatus'][0]['Status'])) {
-                return $result['InstanceStatuses']['InstanceStatus'][0]['Status'];
+            $statuses = $result['InstanceStatuses']['InstanceStatus'] ?? [];
+            foreach ($statuses as $item) {
+                if (($item['InstanceId'] ?? '') === $account['instance_id']) {
+                    return $item['Status'];
+                }
             }
 
-            throw new \Exception("API 响应未找到实例状态 (请检查 Instance ID)");
+            // 如果没找到匹配的 ID，且返回了列表（说明过滤参数没生效），且当前账号只有一个实例 ID，则抛出异常
+            if (empty($statuses) || count($statuses) > 1) {
+                throw new \Exception("API 响应未找到匹配的实例状态 (ID: {$account['instance_id']})");
+            }
+
+            return 'Unknown';
         }, 'getInstanceStatus');
     }
 
+    /**
+     * 获取实例详细健康状态 (用于识别操作系统启动中等状态)
+     */
+    public function getInstanceFullStatus($account)
+    {
+        return $this->executeWithRetry(function () use ($account) {
+            AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
+                ->regionId($account['region_id'])
+                ->asDefaultClient();
+
+            $options = [
+                'query' => [
+                    'RegionId' => $account['region_id'],
+                    'InstanceId.1' => $account['instance_id']
+                ],
+                'connect_timeout' => 5.0,
+                'timeout' => 10.0
+            ];
+
+            $result = AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeInstancesFullStatus')
+                ->method('POST')
+                ->host("ecs.{$account['region_id']}.aliyuncs.com")
+                ->options($options)
+                ->request();
+
+            $statusSet = $result['InstanceFullStatusSet']['InstanceFullStatus'][0] ?? null;
+            if ($statusSet && ($statusSet['InstanceId'] ?? '') === $account['instance_id']) {
+                return [
+                    'status' => $statusSet['Status']['Name'] ?? 'Unknown',
+                    'healthStatus' => $statusSet['HealthStatus']['Name'] ?? 'Unknown',
+                ];
+            }
+
+            return null;
+        }, 'getInstanceFullStatus');
+    }
+
+    /**
+     * 释放（删除）实例
+     * @throws \Exception
+     */
+    public function deleteInstance($account, $forceStop = false)
+    {
+        if (empty($account['instance_id'])) {
+            throw new \Exception("未配置 Instance ID");
+        }
+
+        try {
+            return $this->executeWithRetry(function () use ($account) {
+                AlibabaCloud::accessKeyClient($account['access_key_id'], $account['access_key_secret'])
+                    ->regionId($account['region_id'])
+                    ->asDefaultClient();
+
+                AlibabaCloud::rpc()
+                    ->product('Ecs')
+                    ->scheme('https')
+                    ->version('2014-05-26')
+                    ->action('DeleteInstance')
+                    ->method('POST')
+                    ->host("ecs.{$account['region_id']}.aliyuncs.com")
+                    ->options([
+                        'query' => [
+                            'RegionId' => $account['region_id'],
+                            'InstanceId' => $account['instance_id'],
+                            'Force' => true,
+                        ],
+                        'connect_timeout' => 5.0,
+                        'timeout' => 15.0
+                    ])
+                    ->request();
+
+                return true;
+            }, 'deleteInstance');
+        } catch (ServerException $e) {
+            $code = $e->getErrorCode();
+            if (stripos($code, 'NotFound') !== false || stripos($code, 'InvalidInstanceId') !== false) {
+                return true;
+            }
+            throw $e;
+        }
+    }
     /**
      * 控制实例开关机
      * @throws \Exception
@@ -245,6 +524,1020 @@ class AliyunService
 
             return true;
         }, 'controlInstance');
+    }
+
+    /**
+     * 获取当前账号可访问的地域列表
+     * @param string $key
+     * @param string $secret
+     * @return array
+     * @throws \Exception
+     */
+    public function getRegions($key, $secret)
+    {
+        $cacheKey = md5($key);
+        if (isset($this->regionCache[$cacheKey])) {
+            return $this->regionCache[$cacheKey];
+        }
+
+        $result = $this->executeWithRetry(function () use ($key, $secret) {
+            AlibabaCloud::accessKeyClient($key, $secret)
+                ->regionId('cn-hangzhou')
+                ->asDefaultClient();
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeRegions')
+                ->method('POST')
+                ->host('ecs.cn-hangzhou.aliyuncs.com')
+                ->options([
+                    'connect_timeout' => 5.0,
+                    'timeout' => 10.0
+                ])
+                ->request();
+        }, 'getRegions');
+
+        $regions = [];
+        foreach (($result['Regions']['Region'] ?? []) as $region) {
+            if (empty($region['RegionId'])) {
+                continue;
+            }
+
+            $regions[] = [
+                'regionId' => $region['RegionId'],
+                'localName' => $region['LocalName'] ?? $region['RegionId']
+            ];
+        }
+
+        $this->regionCache[$cacheKey] = $regions;
+        return $regions;
+    }
+
+    /**
+     * 列出当前账号下所有 ECS 实例
+     * @param string $key
+     * @param string $secret
+     * @return array
+     * @throws \Exception
+     */
+    public function getInstances($key, $secret, $targetRegionId = null)
+    {
+        $regions = $this->getRegions($key, $secret);
+        if (!empty($targetRegionId)) {
+            $matchedRegion = null;
+            foreach ($regions as $region) {
+                if (($region['regionId'] ?? '') === $targetRegionId) {
+                    $matchedRegion = $region;
+                    break;
+                }
+            }
+
+            $regions = [[
+                'regionId' => $targetRegionId,
+                'localName' => $matchedRegion['localName'] ?? $targetRegionId
+            ]];
+        }
+
+        $instances = [];
+
+        foreach ($regions as $region) {
+            $pageNumber = 1;
+
+            try {
+                do {
+                    $result = $this->executeWithRetry(function () use ($key, $secret, $region, $pageNumber) {
+                        AlibabaCloud::accessKeyClient($key, $secret)
+                            ->regionId($region['regionId'])
+                            ->asDefaultClient();
+
+                        return AlibabaCloud::rpc()
+                            ->product('Ecs')
+                            ->scheme('https')
+                            ->version('2014-05-26')
+                            ->action('DescribeInstances')
+                            ->method('POST')
+                            ->host("ecs.{$region['regionId']}.aliyuncs.com")
+                            ->options([
+                                'query' => [
+                                    'RegionId' => $region['regionId'],
+                                    'PageSize' => 100,
+                                    'PageNumber' => $pageNumber
+                                ],
+                                'connect_timeout' => 8.0,
+                                'timeout' => 20.0
+                            ])
+                            ->request();
+                    }, 'getInstances');
+
+                    $items = $result['Instances']['Instance'] ?? [];
+                    foreach ($items as $instance) {
+                        $instances[] = [
+                            'instanceId' => $instance['InstanceId'] ?? '',
+                            'instanceName' => $instance['InstanceName'] ?? '',
+                            'status' => $instance['Status'] ?? 'Unknown',
+                            'regionId' => $region['regionId'],
+                            'regionName' => $region['localName'],
+                            'instanceType' => $instance['InstanceType'] ?? '',
+                            'cpu' => $instance['Cpu'] ?? 0,
+                            'memory' => $instance['Memory'] ?? 0,
+                            'internetMaxBandwidthOut' => (int) ($instance['InternetMaxBandwidthOut'] ?? 0),
+                            'osName' => $instance['OSName'] ?? '',
+                            'publicIp' => $instance['PublicIpAddress']['IpAddress'][0] ?? $instance['EipAddress']['IpAddress'] ?? '',
+                            'privateIp' => $instance['VpcAttributes']['PrivateIpAddress']['IpAddress'][0] ?? '',
+                            'stoppedMode' => $instance['StoppedMode'] ?? '',
+                            'chargeType' => $instance['InstanceChargeType'] ?? ''
+                        ];
+                    }
+
+                    $totalCount = (int) ($result['TotalCount'] ?? count($items));
+                    $pageSize = (int) ($result['PageSize'] ?? 100);
+                    $pageNumber++;
+                } while ($totalCount > 0 && (($pageNumber - 1) * $pageSize) < $totalCount);
+            } catch (\Exception $e) {
+                if (!empty($targetRegionId)) {
+                    throw $e;
+                }
+                continue;
+            }
+        }
+
+        usort($instances, function ($a, $b) {
+            $regionCompare = strcmp($a['regionId'], $b['regionId']);
+            if ($regionCompare !== 0) {
+                return $regionCompare;
+            }
+
+            return strcmp($a['instanceId'], $b['instanceId']);
+        });
+
+        return $instances;
+    }
+
+    public function buildEcsCreatePreview($account, array $request, $clientIp = '')
+    {
+        $regionId = trim((string) ($request['regionId'] ?? $account['region_id'] ?? ''));
+        $instanceType = trim((string) ($request['instanceType'] ?? '')) ?: 'ecs.e-c4m1.large';
+        $osKey = trim((string) ($request['osKey'] ?? 'ubuntu_22'));
+        $instanceName = trim((string) ($request['instanceName'] ?? ''));
+        if ($instanceName === '') {
+            $instanceName = 'launch-' . date('Ymd-His');
+        }
+        $requestedDiskSize = (int) ($request['systemDiskSize'] ?? 20);
+
+        if ($regionId === '') {
+            throw new \Exception('请选择区域');
+        }
+
+        $key = $account['access_key_id'];
+        $secret = $account['access_key_secret'];
+
+        $zone = $this->selectAvailableZone($key, $secret, $regionId, $instanceType);
+        $instanceTypeInfo = $this->describeInstanceType($key, $secret, $regionId, $instanceType);
+        $image = $this->selectSystemImage($key, $secret, $regionId, $osKey, $instanceTypeInfo['CpuArchitecture'] ?? '');
+        $diskCategory = $this->selectDiskCategory($zone);
+        $diskRange = $this->getSystemDiskSizeRange($key, $secret, $regionId, $zone['zoneId'], $instanceType, $diskCategory);
+        $diskSize = $this->normalizeSystemDiskSize($requestedDiskSize, $diskRange);
+        $bandwidth = $this->estimateMaxBandwidthOut($instanceType, $regionId);
+        $loginPort = ($image['osType'] ?? 'linux') === 'windows' ? 3389 : 22;
+        $loginUser = ($image['osType'] ?? 'linux') === 'windows' ? 'Administrator' : 'root';
+        $securityRule = '默认全开：允许 0.0.0.0/0 入方向 TCP/UDP/ICMP';
+
+        return [
+            'account' => [
+                'groupKey' => $account['group_key'] ?? '',
+                'label' => trim((string) ($account['remark'] ?? '')) ?: substr($key, 0, 7) . '***'
+            ],
+            'regionId' => $regionId,
+            'zoneId' => $zone['zoneId'],
+            'instanceType' => $instanceType,
+            'instanceName' => $instanceName,
+            'osKey' => $osKey,
+            'osLabel' => $image['label'],
+            'imageId' => $image['imageId'],
+            'imageSize' => (int) ($image['size'] ?? 0),
+            'loginUser' => $loginUser,
+            'loginPort' => $loginPort,
+            'clientCidrIp' => '0.0.0.0/0',
+            'chargeType' => 'PostPaid',
+            'internetChargeType' => 'PayByTraffic',
+            'internetMaxBandwidthOut' => $bandwidth,
+            'systemDisk' => [
+                'category' => $diskCategory,
+                'size' => $diskSize,
+                'min' => $diskRange['min'],
+                'max' => $diskRange['max'],
+                'unit' => $diskRange['unit']
+            ],
+            'network' => [
+                'vpc' => [
+                    'mode' => 'auto',
+                    'name' => "ecs-controller-vpc-{$regionId}",
+                    'cidr' => '172.31.0.0/16'
+                ],
+                'vswitch' => [
+                    'mode' => 'auto',
+                    'name' => "ecs-controller-vsw-{$zone['zoneId']}",
+                    'cidr' => $this->cidrForZone($zone['zoneId'])
+                ],
+                'securityGroup' => [
+                    'mode' => 'auto',
+                    'name' => "ecs-controller-sg-{$regionId}",
+                    'rules' => [$securityRule]
+                ]
+            ],
+            'cdtCompatible' => true,
+            'backupEnabled' => false,
+            'pricing' => [
+                'available' => false,
+                'currency' => ($account['site_type'] ?? 'international') === 'international' ? 'USD' : 'CNY',
+                'message' => '费用预估暂不可用。实例按量计费，公网按实际出口流量计费，最终以阿里云账单为准。',
+                'trafficNote' => '公网按使用流量计费，并按 CDT 兼容方式创建。'
+            ],
+            'warnings' => array_values(array_filter([
+                '公网带宽峰值会自动尝试最高可用值，若账号配额或规格限制不支持，会自动降级重试。',
+                "系统盘将严格按 {$diskSize} GB 创建；当前 API 返回范围为 {$diskRange['min']}-{$diskRange['max']} {$diskRange['unit']}，超出范围会直接报错。",
+                '文件备份默认不启用；如需备份，请创建后在阿里云控制台单独开启。',
+                '安全组默认全开，便于测试和交付；生产环境建议创建后收紧来源 IP 和端口。'
+            ]))
+        ];
+    }
+
+    public function createManagedEcsFromPreview($account, array $preview, callable $progress = null)
+    {
+        $key = $account['access_key_id'];
+        $secret = $account['access_key_secret'];
+        $regionId = $preview['regionId'];
+        $zoneId = $preview['zoneId'];
+        $instanceType = $preview['instanceType'];
+        $password = $this->generateInstancePassword();
+
+        $this->emitProgress($progress, '准备 VPC');
+        $vpc = $this->ensureVpc($key, $secret, $regionId, $preview['network']['vpc']['name'], $preview['network']['vpc']['cidr']);
+
+        $this->emitProgress($progress, '准备交换机');
+        $vswitch = $this->ensureVSwitch(
+            $key,
+            $secret,
+            $regionId,
+            $zoneId,
+            $vpc['VpcId'],
+            $preview['network']['vswitch']['name'],
+            $preview['network']['vswitch']['cidr']
+        );
+
+        $this->emitProgress($progress, '准备安全组');
+        $securityGroup = $this->ensureSecurityGroup($key, $secret, $regionId, $vpc['VpcId'], $preview['network']['securityGroup']['name']);
+        $this->authorizeOpenSecurityGroupRules($key, $secret, $regionId, $securityGroup['SecurityGroupId']);
+
+        $bandwidthCandidates = $this->bandwidthCandidates((int) ($preview['internetMaxBandwidthOut'] ?? 100));
+        $diskCategories = array_unique(array_filter([
+            $preview['systemDisk']['category'] ?? 'cloud_essd',
+            'cloud_auto',
+            'cloud_essd',
+            'cloud_efficiency',
+            'cloud'
+        ]));
+        // 系统盘成本敏感，严格使用用户确认的值；若阿里云拒绝，不自动放大。
+        $diskSize = $this->normalizeSystemDiskSize($preview['systemDisk']['size'] ?? 20, $preview['systemDisk'] ?? []);
+        $lastError = null;
+
+        foreach ($bandwidthCandidates as $bandwidth) {
+            foreach ($diskCategories as $diskCategory) {
+                try {
+                    $this->emitProgress($progress, "创建 ECS（{$bandwidth} Mbps / {$diskCategory}）");
+                    $instanceIds = $this->runInstance(
+                        $key,
+                        $secret,
+                        $regionId,
+                        [
+                            'zoneId' => $zoneId,
+                            'instanceType' => $instanceType,
+                            'imageId' => $preview['imageId'],
+                            'securityGroupId' => $securityGroup['SecurityGroupId'],
+                            'vSwitchId' => $vswitch['VSwitchId'],
+                            'instanceName' => $preview['instanceName'],
+                            'password' => $password,
+                            'internetMaxBandwidthOut' => $bandwidth,
+                            'systemDiskCategory' => $diskCategory,
+                            'systemDiskSize' => $diskSize
+                        ]
+                    );
+
+                    $instanceId = $instanceIds[0] ?? '';
+                    if ($instanceId === '') {
+                        throw new \Exception('RunInstances 未返回 InstanceId');
+                    }
+
+                    $this->emitProgress($progress, '等待实例启动');
+                    $instance = $this->waitInstanceReady($key, $secret, $regionId, $instanceId);
+
+                    return [
+                        'instanceId' => $instanceId,
+                        'publicIp' => $instance['publicIp'] ?? '',
+                        'privateIp' => $instance['privateIp'] ?? '',
+                        'status' => $instance['status'] ?? 'Unknown',
+                        'instanceName' => $preview['instanceName'],
+                        'instanceType' => $instanceType,
+                        'vpcId' => $vpc['VpcId'],
+                        'vswitchId' => $vswitch['VSwitchId'],
+                        'securityGroupId' => $securityGroup['SecurityGroupId'],
+                        'internetMaxBandwidthOut' => $bandwidth,
+                        'systemDiskCategory' => $diskCategory,
+                        'systemDiskSize' => $diskSize,
+                        'loginUser' => $preview['loginUser'] ?? 'root',
+                        'loginPassword' => $password
+                    ];
+                } catch (\Exception $e) {
+                    $lastError = $e;
+                    $message = $e->getMessage();
+                    if ($this->isDiskSizeError($message)) {
+                        throw new \Exception("系统盘 {$diskSize} GB 不被当前镜像或实例规格支持，请手动调整系统盘大小后重新创建。阿里云返回：" . $message);
+                    }
+                    if (stripos($message, 'InvalidInstanceType.NotSupported') !== false || stripos($message, 'image architecture') !== false) {
+                        $instanceTypeInfo = $this->describeInstanceType($key, $secret, $regionId, $instanceType);
+                        $image = $this->selectSystemImage($key, $secret, $regionId, $preview['osKey'] ?? 'ubuntu_22', $instanceTypeInfo['CpuArchitecture'] ?? '');
+                        $preview['imageId'] = $image['imageId'];
+                        $preview['osLabel'] = $image['label'];
+                    }
+                    continue;
+                }
+            }
+        }
+
+        throw new \Exception($lastError ? $lastError->getMessage() : 'ECS 创建失败');
+    }
+
+    private function selectAvailableZone($key, $secret, $regionId, $instanceType)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $instanceType) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeZones')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'InstanceType' => $instanceType,
+                        'AvailableResourceCreation.1' => 'Instance'
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'selectAvailableZone');
+
+        $zones = $result['Zones']['Zone'] ?? [];
+        foreach ($zones as $zone) {
+            if (!empty($zone['ZoneId'])) {
+                return [
+                    'zoneId' => $zone['ZoneId'],
+                    'raw' => $zone
+                ];
+            }
+        }
+
+        throw new \Exception("当前区域 {$regionId} 下未找到规格 {$instanceType} 的可用区库存");
+    }
+
+    private function describeInstanceType($key, $secret, $regionId, $instanceType)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $instanceType) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeInstanceTypes')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'InstanceTypes' => json_encode([$instanceType])
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'describeInstanceType');
+
+        $types = $result['InstanceTypes']['InstanceType'] ?? [];
+        foreach ($types as $type) {
+            if (($type['InstanceTypeId'] ?? '') === $instanceType) {
+                return $type;
+            }
+        }
+
+        return $types[0] ?? [];
+    }
+
+    private function selectSystemImage($key, $secret, $regionId, $osKey, $cpuArchitecture = '')
+    {
+        $profiles = [
+            'alibaba_cloud_linux_3' => ['label' => 'Alibaba Cloud Linux 3', 'osType' => 'linux', 'platform' => 'Aliyun', 'patterns' => ['aliyun_3', 'alibaba cloud linux 3']],
+            'ubuntu_22' => ['label' => 'Ubuntu 22.04', 'osType' => 'linux', 'platform' => 'Ubuntu', 'patterns' => ['ubuntu_22', 'ubuntu 22', '22_04']],
+            'ubuntu_24' => ['label' => 'Ubuntu 24.04', 'osType' => 'linux', 'platform' => 'Ubuntu', 'patterns' => ['ubuntu_24', 'ubuntu 24', '24_04']],
+            'debian_12' => ['label' => 'Debian 12', 'osType' => 'linux', 'platform' => 'Debian', 'patterns' => ['debian_12', 'debian 12']],
+            'centos_stream_9' => ['label' => 'CentOS Stream 9', 'osType' => 'linux', 'platform' => 'CentOS', 'patterns' => ['centos_stream_9', 'centos stream 9']],
+            'windows_2022' => ['label' => 'Windows Server 2022', 'osType' => 'windows', 'platform' => 'Windows Server', 'patterns' => ['win2022', 'windows server 2022']]
+        ];
+        $profile = $profiles[$osKey] ?? $profiles['ubuntu_22'];
+        $architecture = $this->normalizeImageArchitecture($cpuArchitecture);
+
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $profile, $architecture) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            $query = [
+                'RegionId' => $regionId,
+                'ImageOwnerAlias' => 'system',
+                'OSType' => $profile['osType'],
+                'Status' => 'Available',
+                'PageSize' => 100
+            ];
+
+            if (!empty($profile['platform'])) {
+                $query['Platform'] = $profile['platform'];
+            }
+            if ($architecture !== '') {
+                $query['Architecture'] = $architecture;
+            }
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeImages')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => $query,
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'selectSystemImage');
+
+        $images = $result['Images']['Image'] ?? [];
+        usort($images, function ($a, $b) {
+            return strcmp((string) ($b['CreationTime'] ?? ''), (string) ($a['CreationTime'] ?? ''));
+        });
+
+        foreach ($images as $image) {
+            $haystack = strtolower(($image['ImageId'] ?? '') . ' ' . ($image['ImageName'] ?? '') . ' ' . ($image['Description'] ?? ''));
+            foreach ($profile['patterns'] as $pattern) {
+                if (strpos($haystack, strtolower($pattern)) !== false) {
+                    return [
+                        'imageId' => $image['ImageId'],
+                        'label' => $profile['label'],
+                        'osType' => $profile['osType'],
+                        'size' => (int) ($image['Size'] ?? 0)
+                    ];
+                }
+            }
+        }
+
+        throw new \Exception("当前区域未找到可用系统镜像：{$profile['label']}");
+    }
+
+    private function normalizeImageArchitecture($cpuArchitecture)
+    {
+        $value = strtolower((string) $cpuArchitecture);
+        if (strpos($value, 'arm') !== false || strpos($value, 'aarch64') !== false) {
+            return 'arm64';
+        }
+        if (strpos($value, 'x86') !== false || strpos($value, 'amd64') !== false || strpos($value, 'i386') !== false) {
+            return 'x86_64';
+        }
+        return '';
+    }
+
+    private function ensureVpc($key, $secret, $regionId, $name, $cidr)
+    {
+        $existing = $this->describeManagedVpcs($key, $secret, $regionId);
+        if (!empty($existing)) {
+            return $existing[0];
+        }
+
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $name, $cidr) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Vpc')
+                ->scheme('https')
+                ->version('2016-04-28')
+                ->action('CreateVpc')
+                ->method('POST')
+                ->host($this->vpcHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'VpcName' => $name,
+                        'CidrBlock' => $cidr,
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'ensureVpc');
+
+        return ['VpcId' => $result['VpcId'] ?? '', 'VpcName' => $name, 'CidrBlock' => $cidr];
+    }
+
+    private function ensureVSwitch($key, $secret, $regionId, $zoneId, $vpcId, $name, $cidr)
+    {
+        $existing = $this->describeManagedVSwitches($key, $secret, $regionId, $vpcId, $zoneId);
+        if (!empty($existing)) {
+            return $existing[0];
+        }
+
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $zoneId, $vpcId, $name, $cidr) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Vpc')
+                ->scheme('https')
+                ->version('2016-04-28')
+                ->action('CreateVSwitch')
+                ->method('POST')
+                ->host($this->vpcHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'ZoneId' => $zoneId,
+                        'VpcId' => $vpcId,
+                        'VSwitchName' => $name,
+                        'CidrBlock' => $cidr,
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 20.0
+                ])
+                ->request();
+        }, 'ensureVSwitch');
+
+        return ['VSwitchId' => $result['VSwitchId'] ?? '', 'VSwitchName' => $name, 'ZoneId' => $zoneId, 'CidrBlock' => $cidr];
+    }
+
+    private function ensureSecurityGroup($key, $secret, $regionId, $vpcId, $name)
+    {
+        $existing = $this->describeManagedSecurityGroups($key, $secret, $regionId, $vpcId);
+        if (!empty($existing)) {
+            return $existing[0];
+        }
+
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $vpcId, $name) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('CreateSecurityGroup')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'VpcId' => $vpcId,
+                        'SecurityGroupName' => $name,
+                        'Description' => 'Managed by CDT Monitor',
+                        'SecurityGroupType' => 'normal',
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'ensureSecurityGroup');
+
+        return ['SecurityGroupId' => $result['SecurityGroupId'] ?? '', 'SecurityGroupName' => $name];
+    }
+
+    private function authorizeSecurityGroupRule($key, $secret, $regionId, $securityGroupId, $port, $sourceCidrIp)
+    {
+        try {
+            $this->executeWithRetry(function () use ($key, $secret, $regionId, $securityGroupId, $port, $sourceCidrIp) {
+                $this->setDefaultClient($key, $secret, $regionId);
+
+                return AlibabaCloud::rpc()
+                    ->product('Ecs')
+                    ->scheme('https')
+                    ->version('2014-05-26')
+                    ->action('AuthorizeSecurityGroup')
+                    ->method('POST')
+                    ->host($this->ecsHost($regionId))
+                    ->options([
+                        'query' => [
+                            'RegionId' => $regionId,
+                            'SecurityGroupId' => $securityGroupId,
+                            'IpProtocol' => 'tcp',
+                            'PortRange' => "{$port}/{$port}",
+                            'SourceCidrIp' => $sourceCidrIp,
+                            'Policy' => 'accept',
+                            'Priority' => '1',
+                            'Description' => 'CDT Monitor managed remote access'
+                        ],
+                        'connect_timeout' => 5.0,
+                        'timeout' => 15.0
+                    ])
+                    ->request();
+            }, 'authorizeSecurityGroupRule');
+        } catch (\Exception $e) {
+            if (stripos($e->getMessage(), 'InvalidPermission.Duplicate') === false) {
+                throw $e;
+            }
+        }
+    }
+
+    private function authorizeOpenSecurityGroupRules($key, $secret, $regionId, $securityGroupId)
+    {
+        $rules = [
+            ['protocol' => 'tcp', 'port' => '1/65535'],
+            ['protocol' => 'udp', 'port' => '1/65535'],
+            ['protocol' => 'icmp', 'port' => '-1/-1']
+        ];
+
+        foreach ($rules as $rule) {
+            try {
+                $this->executeWithRetry(function () use ($key, $secret, $regionId, $securityGroupId, $rule) {
+                    $this->setDefaultClient($key, $secret, $regionId);
+
+                    return AlibabaCloud::rpc()
+                        ->product('Ecs')
+                        ->scheme('https')
+                        ->version('2014-05-26')
+                        ->action('AuthorizeSecurityGroup')
+                        ->method('POST')
+                        ->host($this->ecsHost($regionId))
+                        ->options([
+                            'query' => [
+                                'RegionId' => $regionId,
+                                'SecurityGroupId' => $securityGroupId,
+                                'IpProtocol' => $rule['protocol'],
+                                'PortRange' => $rule['port'],
+                                'SourceCidrIp' => '0.0.0.0/0',
+                                'Policy' => 'accept',
+                                'Priority' => '1',
+                                'Description' => 'CDT Monitor open access'
+                            ],
+                            'connect_timeout' => 5.0,
+                            'timeout' => 15.0
+                        ])
+                        ->request();
+                }, 'authorizeOpenSecurityGroupRules');
+            } catch (\Exception $e) {
+                if (stripos($e->getMessage(), 'InvalidPermission.Duplicate') === false) {
+                    throw $e;
+                }
+            }
+        }
+    }
+
+    private function runInstance($key, $secret, $regionId, array $params)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $params) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('RunInstances')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'ZoneId' => $params['zoneId'],
+                        'InstanceType' => $params['instanceType'],
+                        'ImageId' => $params['imageId'],
+                        'SecurityGroupId' => $params['securityGroupId'],
+                        'VSwitchId' => $params['vSwitchId'],
+                        'InstanceName' => $params['instanceName'],
+                        'HostName' => preg_replace('/[^a-zA-Z0-9-]/', '-', strtolower($params['instanceName'])),
+                        'Password' => $params['password'],
+                        'InstanceChargeType' => 'PostPaid',
+                        'InternetChargeType' => 'PayByTraffic',
+                        'InternetMaxBandwidthOut' => (int) $params['internetMaxBandwidthOut'],
+                        'SystemDisk.Category' => $params['systemDiskCategory'],
+                        'SystemDisk.Size' => (int) $params['systemDiskSize'],
+                        'DeletionProtection' => 'false',
+                        'IoOptimized' => 'optimized',
+                        'Amount' => 1,
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 25.0
+                ])
+                ->request();
+        }, 'runInstance', 1);
+
+        return $result['InstanceIdSets']['InstanceIdSet'] ?? [];
+    }
+
+    private function waitInstanceReady($key, $secret, $regionId, $instanceId)
+    {
+        $last = null;
+        for ($i = 0; $i < 18; $i++) {
+            sleep($i === 0 ? 2 : 5);
+            $instances = $this->describeInstancesByIds($key, $secret, $regionId, [$instanceId]);
+            if (!empty($instances)) {
+                $last = $instances[0];
+                if (in_array($last['status'], ['Running', 'Stopped'], true)) {
+                    return $last;
+                }
+            }
+        }
+
+        return $last ?: ['status' => 'Unknown'];
+    }
+
+    private function describeInstancesByIds($key, $secret, $regionId, array $instanceIds)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $instanceIds) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeInstances')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'InstanceIds' => json_encode(array_values($instanceIds))
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'describeInstancesByIds');
+
+        $items = $result['Instances']['Instance'] ?? [];
+        return array_map(function ($instance) {
+            return [
+                'instanceId' => $instance['InstanceId'] ?? '',
+                'instanceName' => $instance['InstanceName'] ?? '',
+                'status' => $instance['Status'] ?? 'Unknown',
+                'instanceType' => $instance['InstanceType'] ?? '',
+                'internetMaxBandwidthOut' => (int) ($instance['InternetMaxBandwidthOut'] ?? 0),
+                'publicIp' => $instance['PublicIpAddress']['IpAddress'][0] ?? $instance['EipAddress']['IpAddress'] ?? '',
+                'privateIp' => $instance['VpcAttributes']['PrivateIpAddress']['IpAddress'][0] ?? ''
+            ];
+        }, $items);
+    }
+
+    private function describeManagedVpcs($key, $secret, $regionId)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Vpc')
+                ->scheme('https')
+                ->version('2016-04-28')
+                ->action('DescribeVpcs')
+                ->method('POST')
+                ->host($this->vpcHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'describeManagedVpcs');
+
+        return $result['Vpcs']['Vpc'] ?? [];
+    }
+
+    private function describeManagedVSwitches($key, $secret, $regionId, $vpcId, $zoneId)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $vpcId, $zoneId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Vpc')
+                ->scheme('https')
+                ->version('2016-04-28')
+                ->action('DescribeVSwitches')
+                ->method('POST')
+                ->host($this->vpcHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'VpcId' => $vpcId,
+                        'ZoneId' => $zoneId,
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'describeManagedVSwitches');
+
+        return $result['VSwitches']['VSwitch'] ?? [];
+    }
+
+    private function describeManagedSecurityGroups($key, $secret, $regionId, $vpcId)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $vpcId) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeSecurityGroups')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'VpcId' => $vpcId,
+                        'Tag.1.Key' => $this->managedTagKey,
+                        'Tag.1.Value' => $this->managedTagValue
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'describeManagedSecurityGroups');
+
+        return $result['SecurityGroups']['SecurityGroup'] ?? [];
+    }
+
+    private function defaultMinSystemDiskSize($osKey)
+    {
+        return 20;
+    }
+
+    private function getSystemDiskSizeRange($key, $secret, $regionId, $zoneId, $instanceType, $diskCategory)
+    {
+        $result = $this->executeWithRetry(function () use ($key, $secret, $regionId, $zoneId, $instanceType, $diskCategory) {
+            $this->setDefaultClient($key, $secret, $regionId);
+
+            return AlibabaCloud::rpc()
+                ->product('Ecs')
+                ->scheme('https')
+                ->version('2014-05-26')
+                ->action('DescribeAvailableResource')
+                ->method('POST')
+                ->host($this->ecsHost($regionId))
+                ->options([
+                    'query' => [
+                        'RegionId' => $regionId,
+                        'ZoneId' => $zoneId,
+                        'DestinationResource' => 'SystemDisk',
+                        'ResourceType' => 'instance',
+                        'InstanceType' => $instanceType,
+                        'SystemDiskCategory' => $diskCategory,
+                        'IoOptimized' => 'optimized',
+                        'NetworkCategory' => 'vpc',
+                        'InstanceChargeType' => 'PostPaid'
+                    ],
+                    'connect_timeout' => 5.0,
+                    'timeout' => 15.0
+                ])
+                ->request();
+        }, 'getSystemDiskSizeRange');
+
+        $zones = $result['AvailableZones']['AvailableZone'] ?? [];
+        foreach ($zones as $zone) {
+            $resources = $zone['AvailableResources']['AvailableResource'] ?? [];
+            foreach ($resources as $resource) {
+                if (($resource['Type'] ?? '') !== 'SystemDisk') {
+                    continue;
+                }
+
+                $supported = $resource['SupportedResources']['SupportedResource'] ?? [];
+                foreach ($supported as $item) {
+                    $value = $item['Value'] ?? '';
+                    if ($value !== '' && $value !== $diskCategory) {
+                        continue;
+                    }
+
+                    return [
+                        'min' => max(1, (int) ($item['Min'] ?? 20)),
+                        'max' => max(1, (int) ($item['Max'] ?? 2048)),
+                        'unit' => $item['Unit'] ?? 'GiB',
+                        'status' => $item['Status'] ?? '',
+                        'statusCategory' => $item['StatusCategory'] ?? ''
+                    ];
+                }
+            }
+        }
+
+        throw new \Exception("当前可用区/规格/磁盘类型未返回系统盘容量范围，请更换磁盘类型或实例规格后重试");
+    }
+
+    private function normalizeSystemDiskSize($value, array $range = [])
+    {
+        $size = (int) $value;
+        $min = (int) ($range['min'] ?? 20);
+        $max = (int) ($range['max'] ?? 2048);
+        $unit = $range['unit'] ?? 'GiB';
+
+        if ($size < $min || $size > $max) {
+            throw new \Exception("系统盘大小必须在当前 API 返回范围 {$min}-{$max} {$unit} 之间");
+        }
+        return $size;
+    }
+
+    private function isDiskSizeError($message)
+    {
+        $message = strtolower((string) $message);
+        return strpos($message, 'systemdisk.size') !== false
+            || strpos($message, 'invalidsystemdisksize') !== false
+            || (strpos($message, 'disk') !== false && strpos($message, 'size') !== false);
+    }
+
+    private function selectDiskCategory($zone)
+    {
+        $raw = $zone['raw']['AvailableDiskCategories']['DiskCategories'] ?? $zone['raw']['AvailableDiskCategories']['DiskCategory'] ?? [];
+        $categories = is_array($raw) ? $raw : [];
+        foreach (['cloud_essd', 'cloud_auto', 'cloud_efficiency', 'cloud'] as $preferred) {
+            if (empty($categories) || in_array($preferred, $categories, true)) {
+                return $preferred;
+            }
+        }
+        return 'cloud_essd';
+    }
+
+    private function estimateMaxBandwidthOut($instanceType, $regionId)
+    {
+        return 200;
+    }
+
+    private function bandwidthCandidates($max)
+    {
+        $base = [200, 100, 50, 30, 20, 10, 5, 1];
+        $candidates = array_values(array_filter($base, function ($value) use ($max) {
+            return $value <= max(1, $max);
+        }));
+        if (!in_array($max, $candidates, true)) {
+            array_unshift($candidates, $max);
+        }
+        return array_values(array_unique($candidates));
+    }
+
+    private function normalizePublicCidr($ip)
+    {
+        $ip = trim((string) $ip);
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return $ip . '/32';
+        }
+        return '';
+    }
+
+    private function cidrForZone($zoneId)
+    {
+        $hash = abs(crc32($zoneId));
+        $third = 1 + ($hash % 200);
+        return "172.31.{$third}.0/24";
+    }
+
+    private function generateInstancePassword()
+    {
+        $lower = 'abcdefghijkmnopqrstuvwxyz';
+        $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $digits = '23456789';
+        $symbols = '!@#%^*';
+        $all = $lower . $upper . $digits . $symbols;
+        $password = $lower[random_int(0, strlen($lower) - 1)]
+            . $upper[random_int(0, strlen($upper) - 1)]
+            . $digits[random_int(0, strlen($digits) - 1)]
+            . $symbols[random_int(0, strlen($symbols) - 1)];
+        for ($i = strlen($password); $i < 16; $i++) {
+            $password .= $all[random_int(0, strlen($all) - 1)];
+        }
+        return str_shuffle($password);
+    }
+
+    private function emitProgress($progress, $step)
+    {
+        if (is_callable($progress)) {
+            $progress($step);
+        }
     }
 
     // ==================== BSS 费用中心 API ====================
