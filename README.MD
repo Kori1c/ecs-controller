@@ -38,17 +38,38 @@ docker logs ecs-controller 2>&1 | grep '初始化 token'
 
 ## 阿里云权限
 
-请在阿里云 RAM 中创建一个用于本项目的用户，开启“OpenAPI 调用访问”，然后把 AccessKey ID 和 AccessKey Secret 填入账号管理。
+建议创建一个专门给本项目使用的 RAM 用户（阿里云子账号），不要使用主账号密钥，也不需要授予管理员权限。
 
-项目会根据功能使用以下权限：
+### 怎么添加权限
 
-- **实例管理**：ECS
-- **实例流量**：CMS
-- **账号流量**：CDT
-- **创建实例和 EIP**：VPC、ECS
-- **消费情况**：账单服务
+1. 打开阿里云控制台，搜索并进入“访问控制 RAM”。
+2. 创建用户，开启“OpenAPI 调用访问”，创建并保存 AccessKey ID 和 AccessKey Secret。
+3. 给这个用户“添加权限”，选择“系统策略”，按下面的名称搜索并添加。
+4. 将该用户的 AccessKey ID 和 AccessKey Secret 填入本面板的“账号管理”。
 
-如果出现“CMS 不可用”或“CDT 不可用”，通常是对应的 RAM 权限没有开启。只查看和管理已有实例时，不需要开通创建实例、EIP 和账单权限。
+### 管理已有实例和监控流量
+
+添加下面 3 项。权限名称可以直接复制搜索，点击名称可查看阿里云官方说明。
+
+| 权限名称 | 用途 |
+| --- | --- |
+| [AliyunECSFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunecsfullaccess) | 查看和管理 ECS，支持开关机、流量超限自动关机和定时开关机 |
+| [AliyunCloudMonitorReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuncloudmonitorreadonlyaccess) | 读取每台实例的流量（面板中的 CMS），以及弹性公网 IP（EIP）的地址和带宽 |
+| [AliyunCDTReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuncdtreadonlyaccess) | 读取账号总流量（面板中的 CDT） |
+
+注意：这是方便配置的方案，不是最小权限方案。`AliyunECSFullAccess` 也允许创建和删除 ECS；只授予 ECS 只读权限则无法自动关机。
+
+### 按需添加的权限
+
+| 想使用的功能 | 额外添加的权限 |
+| --- | --- |
+| 在面板中创建实例，并自动创建网络 | [AliyunVPCFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunvpcfullaccess) |
+| 创建实例时使用 EIP、更换 EIP，或释放实例时清理 EIP | [AliyunEIPFullAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyuneipfullaccess) |
+| 查看余额和消费账单 | [AliyunBSSReadOnlyAccess](https://help.aliyun.com/zh/ram/developer-reference/aliyunbssreadonlyaccess) |
+
+只管理已有实例、不更换或释放 EIP、不查看账单时，不需要添加上面 3 项。**VPC 权限不包含 EIP 管理权限**，使用 EIP 管理功能时需要单独添加 EIP 权限。创建实例和 EIP 可能产生费用，请按需授权。
+
+如果提示“CMS 不可用”或“CDT 不可用”，先检查对应的只读权限是否已添加；如果提示“云端数据尚未更新”，可稍后再试。账号测试通过不代表所有功能的权限都已齐全。
 
 ## 主要功能
 
