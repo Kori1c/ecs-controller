@@ -383,7 +383,7 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 	case "fetch_instances":
 		s.fetchInstances(w, data)
 	case "test_account":
-		s.testAccount(w, data)
+		s.testAccount(w, r, data)
 	case "send_test_email", "send_test_telegram", "send_test_webhook":
 		s.testNotification(w, action, data)
 	default:
@@ -1631,7 +1631,7 @@ func (s *Server) fetchInstances(w http.ResponseWriter, data map[string]any) {
 	s.json(w, 200, map[string]any{"success": true, "data": instances})
 }
 
-func (s *Server) testAccount(w http.ResponseWriter, data map[string]any) {
+func (s *Server) testAccount(w http.ResponseWriter, r *http.Request, data map[string]any) {
 	account, _ := data["account"].(map[string]any)
 	if account == nil {
 		s.error(w, 400, "账号数据不能为空")
@@ -1650,46 +1650,22 @@ func (s *Server) testAccount(w http.ResponseWriter, data map[string]any) {
 		s.error(w, 400, "AK、Secret 和区域不能为空")
 		return
 	}
-	client := cloud.NewRPCService(accessKey, secret, region)
-	regions, err := client.DescribeRegions(rctx())
-	if err != nil {
-		s.json(w, 200, map[string]any{"success": false, "message": err.Error()})
+	siteType := fallback(stringValue(account["siteType"]), "china")
+	if siteType != "china" && siteType != "international" {
+		s.error(w, 400, "请选择中国站或国际站")
 		return
 	}
-	regionFound := false
-	for _, item := range regions {
-		if firstMapString([]map[string]any{item}, "RegionId", "regionId") == region {
-			regionFound = true
-			break
-		}
+	var client cloud.Client = cloud.NewRPCService(accessKey, secret, region)
+	if s.CloudFactory != nil {
+		client = s.CloudFactory(app.Account{AccessKeyID: accessKey, AccessKeySecret: secret, RegionID: region, SiteType: siteType})
 	}
-	if !regionFound {
-		s.json(w, 200, map[string]any{"success": false, "message": "当前 AK 无法访问所选区域"})
+	tester, ok := client.(cloud.AccountTester)
+	if !ok {
+		s.error(w, http.StatusServiceUnavailable, "当前云服务不支持权限检查")
 		return
 	}
-	instances, err := client.DescribeInstances(rctx(), region)
-	if err != nil {
-		s.json(w, 200, map[string]any{"success": false, "message": err.Error()})
-		return
-	}
-	monitorStatus, monitorMessage := "skipped", "当前区域暂无实例，未执行云监控流量探测"
-	if len(instances) > 0 {
-		probe := instances[0]
-		end := time.Now().Add(-90 * time.Second).Truncate(time.Minute).UnixMilli()
-		_, _, _, _, metricErr := client.GetOutboundTrafficDelta(rctx(), region, probe.ID, probe.PublicIP, end-10*60*1000, end)
-		if metricErr != nil {
-			monitorMessage = "云监控流量探测未通过: " + metricErr.Error()
-			if cloud.IsMetricNoDataError(metricErr) {
-				monitorMessage = "云端数据尚未更新，请稍后再试"
-			}
-			monitorStatus = "warning"
-		} else {
-			monitorStatus, monitorMessage = "ok", "云监控接口已接通，可获取实例流量"
-		}
-	}
-	maxTraffic := number(account["maxTraffic"], 0)
-	usageUsed := numberFloat(account["usageUsed"])
-	s.json(w, 200, map[string]any{"success": true, "message": "AK 可用，ECS API 已接通", "monitorStatus": monitorStatus, "monitorMessage": monitorMessage, "instanceCount": len(instances), "usageUsed": usageUsed, "usageRemaining": maxFloat(float64(maxTraffic)-usageUsed, 0), "usagePercent": mapPercent(usageUsed, float64(maxTraffic))})
+	w.Header().Set("Cache-Control", "no-store")
+	s.json(w, http.StatusOK, tester.TestAccount(r.Context(), region, siteType))
 }
 
 func (s *Server) resolveMaskedAccountSecret(account map[string]any, accessKey, region string) (string, error) {

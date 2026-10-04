@@ -998,75 +998,136 @@
             color: var(--success-text);
         }
 
-        .test-result-card {
-            margin-top: 18px;
-            padding: 16px;
-            border-radius: 18px;
-            border: 1px solid var(--line);
-            background: color-mix(in srgb, var(--panel-strong) 72%, var(--panel));
-            color: var(--text);
-            display: grid;
-            gap: 10px;
+        .account-test-overlay {
+            z-index: 80;
         }
 
-        .test-result-card.warning {
-            border-color: var(--danger-border);
-            background: color-mix(in srgb, var(--danger-bg) 78%, var(--panel));
+        .account-modal.account-test-modal {
+            width: min(680px, 100%);
+            max-height: calc(100dvh - 32px);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
-        .test-result-card.success {
-            border-color: var(--success-border);
-            background: color-mix(in srgb, var(--success-bg) 78%, var(--panel));
+        .account-test-modal .section-head {
+            flex: 0 0 auto;
         }
 
-        .test-result-line {
+        .account-test-body {
+            min-height: 0;
+            overflow-y: auto;
+            margin-top: 16px;
+            padding-right: 4px;
+            scrollbar-gutter: stable;
+        }
+
+        .account-test-summary {
+            margin-bottom: 16px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--line);
             display: flex;
             align-items: flex-start;
             justify-content: space-between;
             gap: 12px;
+        }
+
+        .account-test-summary p {
             font-size: 13px;
-        }
-
-        .test-result-line strong {
-            color: var(--text);
-        }
-
-        .test-result-title {
-            color: var(--text);
-        }
-
-        .test-result-message {
-            color: var(--muted);
-        }
-
-        .test-result-line > span {
-            color: var(--muted);
-            text-align: right;
+            line-height: 1.6;
             overflow-wrap: anywhere;
         }
 
-        .test-result-line > span.warning-text {
-            color: var(--danger-text);
+        .account-test-meta,
+        .permission-message,
+        .permission-policy,
+        .account-test-note {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-wrap: anywhere;
         }
 
-        .test-result-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 72px;
-            padding: 5px 10px;
-            border-radius: 999px;
+        .permission-group + .permission-group {
+            margin-top: 20px;
+        }
+
+        .permission-group h3 {
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .permission-row {
+            padding: 12px 0;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .permission-row__header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .permission-row__header strong {
+            min-width: 0;
+            font-size: 13px;
+            overflow-wrap: anywhere;
+        }
+
+        .permission-message {
+            margin-top: 4px;
+        }
+
+        .permission-policy {
+            display: block;
+            margin-top: 4px;
+            color: var(--accent);
+        }
+
+        .permission-policy:hover {
+            text-decoration: underline;
+        }
+
+        .permission-status {
+            flex: 0 0 auto;
+            padding: 3px 8px;
+            border-radius: 6px;
             font-size: 12px;
             font-weight: 700;
-            background: var(--success-bg);
-            color: var(--success-text);
-            border: 1px solid var(--success-border);
+            background: var(--panel-strong);
+            color: var(--muted);
         }
 
-        .test-result-badge.warning {
+        .permission-status.ok {
+            background: var(--success-bg);
+            color: var(--success-text);
+        }
+
+        .permission-status.missing,
+        .permission-status.error {
             background: var(--danger-bg);
             color: var(--danger-text);
-            border-color: var(--danger-border);
+        }
+
+        .permission-status.unavailable,
+        .permission-status.warning {
+            background: var(--warning-bg);
+            color: var(--warning-text);
+        }
+
+        .account-test-note {
+            margin-top: 16px;
+        }
+
+        .account-test-footer {
+            display: flex;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding-top: 16px;
+            flex: 0 0 auto;
         }
 
         .chip {
@@ -2908,95 +2969,182 @@
         }
 
         .settings-layout {
-            display: block;
+            display: grid;
+            grid-template-columns: 176px minmax(0, 1fr);
+            align-items: start;
+            gap: 28px;
             margin-top: 24px;
         }
 
         .settings-nav {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
+            display: block;
+            padding-right: 18px;
+            border-right: 1px solid var(--line);
+        }
+
+        .settings-nav__group + .settings-nav__group {
+            margin-top: 24px;
+        }
+
+        .settings-nav__group-title {
+            margin: 0 0 8px;
+            padding-left: 10px;
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0;
         }
 
         .settings-nav__button {
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            display: block;
             width: 100%;
-            min-height: 64px;
-            border: 1px solid transparent;
-            border-radius: 16px;
-            padding: 11px 13px;
-            background: color-mix(in srgb, var(--panel) 58%, transparent);
+            min-height: 40px;
+            padding: 9px 10px;
+            border: 0;
+            border-left: 3px solid transparent;
+            border-radius: 0 6px 6px 0;
             color: var(--muted);
+            background: transparent;
             text-align: left;
-            transition: background .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+            font-size: 13px;
+            transition: background .15s ease, color .15s ease;
         }
 
         .settings-nav__button:hover {
-            border-color: var(--line);
-            background: color-mix(in srgb, var(--panel) 84%, transparent);
+            background: var(--hover-bg);
             color: var(--text);
-            transform: translateY(-1px);
         }
 
         .settings-nav__button.active {
-            border-color: color-mix(in srgb, var(--accent) 28%, var(--line));
+            border-left-color: var(--accent);
             background: var(--accent-light);
-            color: var(--text);
-            box-shadow: inset 0 3px 0 var(--accent);
+            color: var(--accent-strong);
+            font-weight: 700;
         }
 
-        .settings-nav__index {
-            display: grid;
-            place-items: center;
-            width: 28px;
-            height: 28px;
-            flex: 0 0 28px;
-            border: 1px solid var(--line);
-            border-radius: 9px;
-            background: var(--panel);
-            color: var(--accent);
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-            font-size: 0.68rem;
-            font-weight: 800;
-        }
-
-        .settings-nav__button.active .settings-nav__index {
-            border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
-            background: var(--accent);
-            color: #fff;
-        }
-
-        .settings-nav__label {
-            display: block;
-            font-size: 0.86rem;
-            font-weight: 800;
-            line-height: 1.2;
-        }
-
-        .settings-nav__hint {
-            display: block;
-            margin-top: 4px;
-            color: var(--muted);
-            font-size: 0.7rem;
-            line-height: 1.4;
+        .settings-category-mobile {
+            display: none;
         }
 
         .settings-workspace {
             min-width: 0;
-            margin-top: 12px;
+            margin-top: 0;
         }
 
-        /* Keep the settings form dense without changing the larger dashboard cards. */
+        .settings-section__head {
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .settings-section__head h3 {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .settings-fields {
+            display: grid;
+            gap: 20px;
+        }
+
+        .settings-field > label,
+        .settings-field > .field-label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .settings-hint,
+        .settings-warning {
+            margin-top: 8px;
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--muted);
+            overflow-wrap: anywhere;
+        }
+
+        .settings-warning {
+            color: var(--warning-text);
+        }
+
+        .settings-subsection + .settings-subsection {
+            padding-top: 20px;
+            border-top: 1px solid var(--line);
+        }
+
+        .settings-subsection h4 {
+            margin-bottom: 10px;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .settings-workspace .settings-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-height: 52px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--line);
+            font-size: 13px;
+        }
+
+        .settings-toggle > span:first-child {
+            min-width: 0;
+        }
+
+        .settings-toggle .switch-control {
+            flex: 0 0 auto;
+        }
+
+        .settings-toggle .settings-hint {
+            display: block;
+            margin-top: 4px;
+        }
+
+        .settings-passkey-row,
+        .settings-backup-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .settings-backup-actions {
+            justify-content: flex-start;
+        }
+
+        .settings-workspace .brand-logo-preview {
+            width: 52px;
+            height: 52px;
+            border-radius: 8px;
+        }
+
+        @media (max-width: 1023px) {
+            .settings-layout > .settings-nav {
+                display: none;
+            }
+
+            .settings-category-mobile {
+                display: block;
+            }
+        }
+
+        /* Keep settings forms unframed without changing dashboard cards. */
         .settings-workspace .settings-grid {
-            margin-top: 14px;
-            gap: 14px;
+            margin-top: 0;
+            gap: 0;
         }
 
         .settings-workspace .metric-card {
-            border-radius: 12px;
-            padding: 1rem;
+            border: 0;
+            border-radius: 0;
+            padding: 0;
+            background: transparent;
+            box-shadow: none;
         }
 
         .settings-workspace .metric-card.space-y-4 > :not([hidden]) ~ :not([hidden]) {
@@ -5050,39 +5198,103 @@
 
                         <div class="settings-layout">
                             <nav class="settings-nav" aria-label="系统设置分类">
-                                <button
-                                    v-for="(item, index) in settingsItems"
-                                    :key="item.key"
-                                    @click="currentSettingsTab = item.key"
-                                    class="settings-nav__button"
-                                    :class="{ active: currentSettingsTab === item.key }"
-                                >
-                                    <span class="settings-nav__index">{{ String(index + 1).padStart(2, '0') }}</span>
-                                    <span>
-                                        <span class="settings-nav__label">{{ item.label }}</span>
-                                        <span class="settings-nav__hint">{{ item.description }}</span>
-                                    </span>
-                                </button>
+                                <div v-for="group in settingsGroups" :key="group.key" class="settings-nav__group">
+                                    <p class="settings-nav__group-title">{{ group.label }}</p>
+                                    <button v-for="item in group.items" :key="item.key" type="button"
+                                        @click="currentSettingsTab = item.key" class="settings-nav__button"
+                                        :class="{ active: currentSettingsTab === item.key }"
+                                        :aria-current="currentSettingsTab === item.key ? 'page' : undefined">{{ item.label }}</button>
+                                </div>
                             </nav>
+                            <div class="settings-category-mobile">
+                                <label class="field-label" for="settings-category">设置分类</label>
+                                <select id="settings-category" v-model="currentSettingsTab" class="glass-input">
+                                    <optgroup v-for="group in settingsGroups" :key="group.key" :label="group.label">
+                                        <option v-for="item in group.items" :key="item.key" :value="item.key">{{ item.label }}</option>
+                                    </optgroup>
+                                </select>
+                            </div>
 
                             <div class="settings-workspace">
                                 <transition name="settings-panel" mode="out-in">
                                     <div :key="currentSettingsTab" class="settings-grid">
-                            <div v-if="currentSettingsTab === 'global'" class="metric-card space-y-4">
-                                <div>
-                                    <p class="subtle-label">全局配置</p>
-                                    <h3 class="mt-1 text-lg font-bold">全局设置</h3>
+                            <section v-if="currentSettingsTab === 'protection'" class="settings-section">
+                                <header class="settings-section__head"><h3>流量保护</h3></header>
+                                <div class="settings-fields">
+                                    <div class="two-col-grid">
+                                        <div class="settings-field">
+                                            <label for="traffic-threshold">告警阈值 (%)</label>
+                                            <input id="traffic-threshold" v-model.number="config.traffic_threshold" type="number" class="glass-input" min="1" max="100">
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="field-label">阈值动作</label>
+                                            <app-select v-model="config.threshold_action" class="glass-select" :options="[
+                                                { value: 'stop_and_notify', label: '自动关机并告警' },
+                                                { value: 'notify_only', label: '仅发送告警' }
+                                            ]" />
+                                        </div>
+                                    </div>
+                                    <div class="settings-field">
+                                        <label class="field-label">停机模式</label>
+                                        <app-select v-model="config.shutdown_mode" class="glass-select" :options="[
+                                            { value: 'KeepCharging', label: '普通停机' },
+                                            { value: 'StopCharging', label: '节省停机' }
+                                        ]" />
+                                    </div>
                                 </div>
-                                <div class="space-y-3">
-                                    <div class="settings-brand-card rounded-[18px] border border-slate-200/70 bg-white/70 p-4">
-                                        <label class="mb-3 block text-sm font-semibold text-[#6f7787]">页面 Logo</label>
-                                        <div class="settings-brand-row flex flex-wrap items-center gap-4">
+                            </section>
+
+                            <section v-if="currentSettingsTab === 'runtime'" class="settings-section">
+                                <header class="settings-section__head"><h3>运行与费用</h3></header>
+                                <div class="settings-fields">
+                                    <div class="settings-field">
+                                        <label class="field-label">实例同步频率</label>
+                                        <app-select v-model="config.api_interval" class="glass-select" :options="[
+                                            { value: 60, label: '1 分钟' },
+                                            { value: 180, label: '3 分钟' },
+                                            { value: 300, label: '5 分钟' },
+                                            { value: 600, label: '10 分钟' },
+                                            { value: 1800, label: '30 分钟' }
+                                        ]" />
+                                    </div>
+                                    <div class="settings-subsection">
+                                        <h4>自动开机</h4>
+                                        <label class="settings-toggle">
+                                            <span>抢占式实例保活</span>
+                                            <span class="switch-control"><input type="checkbox" v-model="config.keep_alive"><span class="switch-slider"></span></span>
+                                        </label>
+                                        <label class="settings-toggle">
+                                            <span><span>每月 1 号自动开机</span><span class="settings-hint">当实例处于已停机且未触发流量保护时，每月 1 号自动启动一次。</span></span>
+                                            <span class="switch-control"><input type="checkbox" v-model="config.monthly_auto_start"><span class="switch-slider"></span></span>
+                                        </label>
+                                    </div>
+                                    <div class="settings-subsection">
+                                        <h4>费用查询</h4>
+                                        <label class="settings-toggle">
+                                            <span>成本分析（费用中心）</span>
+                                            <span class="switch-control"><input type="checkbox" v-model="config.enable_billing"><span class="switch-slider"></span></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section v-if="currentSettingsTab === 'appearance'" class="settings-section">
+                                <header class="settings-section__head"><h3>外观设置</h3></header>
+                                <div class="settings-fields">
+                                    <div class="settings-field">
+                                        <label for="app-brand-name">控制台名称</label>
+                                        <input id="app-brand-name" v-model.trim="config.AppBrand.name" class="glass-input" maxlength="40" placeholder="ECS 控制台">
+                                        <p class="settings-hint">会同步应用到浏览器标题、顶部品牌、登录页和关于页面，最多 40 个字符。</p>
+                                    </div>
+                                    <div class="settings-field">
+                                        <label for="app-brand-logo">页面 Logo</label>
+                                        <div class="settings-brand-row">
                                             <img v-if="brandLogoUrl" :src="brandLogoUrl" alt="页面 Logo 预览" class="brand-logo-preview">
                                             <div v-else class="brand-logo-fallback !h-[52px] !w-[52px] !rounded-[14px]">C</div>
-                                            <div class="min-w-[220px] flex-1">
+                                            <div>
                                                 <div class="settings-brand-input-row">
-                                                    <input v-model="config.AppBrand.logo_url" class="glass-input" placeholder="Logo 图片地址，或上传本地图片">
-                                                    <div class="flex flex-wrap gap-2">
+                                                    <input id="app-brand-logo" v-model="config.AppBrand.logo_url" class="glass-input" placeholder="Logo 图片地址，或上传本地图片">
+                                                    <div>
                                                         <label class="ghost-button cursor-pointer">
                                                             {{ uploadingLogo ? '上传中...' : '上传 Logo' }}
                                                             <input type="file" class="hidden" accept="image/png,image/jpeg,image/webp" :disabled="uploadingLogo" @change="uploadLogo">
@@ -5090,140 +5302,60 @@
                                                         <button v-if="config.AppBrand.logo_url" @click="clearLogo" type="button" class="danger-button">清除 Logo</button>
                                                     </div>
                                                 </div>
-                                                <p class="mt-2 text-xs leading-5 text-[var(--muted)]">支持 PNG、JPG、WebP，上传文件小于 2MB。也可以直接填写图片 URL。</p>
+                                                <p class="settings-hint">支持 PNG、JPG、WebP，上传文件小于 2MB。也可以直接填写图片 URL。</p>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="settings-brand-card rounded-[18px] border border-slate-200/70 bg-white/70 p-4">
-                                        <label class="mb-2 block text-sm font-semibold text-[#6f7787]" for="app-brand-name">控制台名称</label>
-                                        <input id="app-brand-name" v-model.trim="config.AppBrand.name" class="glass-input" maxlength="40" placeholder="ECS 控制台">
-                                        <p class="mt-2 text-xs leading-5 text-[var(--muted)]">会同步应用到浏览器标题、顶部品牌、登录页和关于页面，最多 40 个字符。</p>
-                                    </div>
-                                    <div class="settings-brand-card rounded-[18px] border border-slate-200/70 bg-white/70 p-4">
-                                        <div class="flex flex-wrap items-start justify-between gap-4">
-                                            <div>
-                                                <p class="text-sm font-semibold text-[#1f2328]">数据备份与恢复</p>
-                                                <p class="mt-1 text-xs leading-5 text-[var(--muted)]">账号、设置、流量历史和 Passkey 会打包为加密文件。备份密码不会保存在系统中，请务必妥善保管。</p>
-                                            </div>
-                                            <span class="rounded-full bg-[#e5f4f2] px-3 py-1 text-xs font-semibold text-[#087f8c]">加密备份</span>
-                                        </div>
-                                        <div class="two-col-grid mt-4">
-                                            <div>
-                                                <label class="mb-2 block text-sm font-semibold text-[#6f7787]" for="backup-password">备份密码</label>
-                                                <input id="backup-password" v-model="backupPassword" type="password" class="glass-input" minlength="8" autocomplete="new-password" placeholder="至少 8 位">
-                                            </div>
-                                            <div>
-                                                <label class="mb-2 block text-sm font-semibold text-[#6f7787]" for="backup-file">恢复文件</label>
-                                                <input id="backup-file" type="file" class="glass-input" accept=".ecsbkp,application/octet-stream" @change="backupFile = $event.target.files?.[0] || null">
-                                            </div>
-                                        </div>
-                                        <div class="mt-4 flex flex-wrap gap-2">
-                                            <button @click="createBackup" class="ghost-button" :disabled="backupBusy">{{ backupBusy ? '处理中...' : '下载备份' }}</button>
-                                            <button @click="restoreBackup" class="danger-button" :disabled="backupBusy || !backupFile">恢复备份</button>
-                                        </div>
-                                        <p class="mt-3 text-xs leading-5 text-amber-700">恢复会覆盖当前账号和设置，清除当前登录会话，并要求使用备份中的管理员凭据重新登录。</p>
-                                    </div>
-                                    <div>
-                                        <label class="mb-2 block text-sm font-semibold text-[#6f7787]">管理员密码</label>
-                                        <input v-model="config.admin_password" type="password" class="glass-input" autocomplete="new-password" placeholder="留空表示不修改，至少 6 位">
-                                    </div>
-                                    <div class="settings-brand-card rounded-[18px] border border-slate-200/70 bg-white/70 p-4">
-                                        <div class="flex flex-wrap items-center justify-between gap-4">
-                                            <div>
-                                                <p class="text-sm font-semibold text-[#1f2328]">Passkey 快速登录</p>
-                                                <p class="mt-1 text-xs leading-5 text-[var(--muted)]">
-                                                    {{ passkeyCount > 0 ? `已设置 ${passkeyCount} 个 Passkey，可在登录页免输入密码。` : '使用设备指纹、面容或安全密钥登录。首次设置仍需先完成密码登录。' }}
-                                                </p>
-                                            </div>
-                                            <button @click="registerPasskey" class="ghost-button" :disabled="passkeyBusy || !passkeySupported">
-                                                {{ passkeyBusy ? '处理中...' : passkeyCount > 0 ? '添加 Passkey' : '设置 Passkey' }}
-                                            </button>
-                                        </div>
-                                        <p v-if="!passkeySupported" class="mt-2 text-xs leading-5 text-amber-700">{{ passkeySupportHint }}</p>
-                                        <label class="switch-row mt-3 flex items-center justify-between gap-4 rounded-[16px] border border-slate-200/70 bg-white/70 px-3 py-3 text-sm">
-                                            <span>
-                                                <span class="block font-semibold text-[#1f2328]">允许密码登录</span>
-                                                <span class="mt-1 block text-xs leading-5 text-[var(--muted)]">
-                                                    {{ config.password_login_enabled ? '开启后可使用管理员密码登录。' : '已关闭，登录时只能使用 Passkey。' }}
-                                                </span>
-                                            </span>
-                                            <span class="switch-control shrink-0">
-                                                <input type="checkbox" v-model="config.password_login_enabled" :disabled="passkeyCount === 0">
-                                                <span class="switch-slider"></span>
-                                            </span>
-                                        </label>
-                                        <p v-if="passkeyCount === 0" class="mt-2 text-xs leading-5 text-amber-700">请先注册至少一个 Passkey，才能关闭密码登录。</p>
-                                    </div>
-                                    <div class="two-col-grid">
-                                        <div>
-                                            <label class="mb-2 block text-sm font-semibold text-[#6f7787]">告警阈值 (%)</label>
-                                            <input v-model.number="config.traffic_threshold" type="number" class="glass-input" min="1" max="100">
-                                        </div>
-                                        <div>
-                                            <label class="mb-2 block text-sm font-semibold text-[#6f7787]">实例同步频率</label>
-                                            <app-select
-                                                v-model="config.api_interval"
-                                                class="glass-select"
-                                                :options="[
-                                                    { value: 60, label: '1 分钟' },
-                                                    { value: 180, label: '3 分钟' },
-                                                    { value: 300, label: '5 分钟' },
-                                                    { value: 600, label: '10 分钟' },
-                                                    { value: 1800, label: '30 分钟' }
-                                                ]"
-                                            />
-                                        </div>
-                                    </div>
-                                    <div class="two-col-grid">
-                                        <div>
-                                            <label class="mb-2 block text-sm font-semibold text-[#6f7787]">停机模式</label>
-                                            <app-select
-                                                v-model="config.shutdown_mode"
-                                                class="glass-select"
-                                                :options="[
-                                                    { value: 'KeepCharging', label: '普通停机' },
-                                                    { value: 'StopCharging', label: '节省停机' }
-                                                ]"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label class="mb-2 block text-sm font-semibold text-[#6f7787]">阈值动作</label>
-                                            <app-select
-                                                v-model="config.threshold_action"
-                                                class="glass-select"
-                                                :options="[
-                                                    { value: 'stop_and_notify', label: '自动关机并告警' },
-                                                    { value: 'notify_only', label: '仅发送告警' }
-                                                ]"
-                                            />
-                                        </div>
-                                    </div>
-                                    <label class="switch-row flex items-center justify-between rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
-                                        <span>抢占式实例保活</span>
-                                        <span class="switch-control">
-                                            <input type="checkbox" v-model="config.keep_alive">
-                                            <span class="switch-slider"></span>
-                                        </span>
-                                    </label>
-                                    <label class="switch-row flex items-center justify-between gap-4 rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
-                                        <span>
-                                            <span class="block font-semibold text-[#1f2328]">每月 1 号自动开机</span>
-                                            <span class="mt-1 block text-xs leading-5 text-[#6f7787]">当实例处于已停机且未触发流量保护时，每月 1 号自动启动一次。</span>
-                                        </span>
-                                        <span class="switch-control shrink-0">
-                                            <input type="checkbox" v-model="config.monthly_auto_start">
-                                            <span class="switch-slider"></span>
-                                        </span>
-                                    </label>
-                                    <label class="switch-row flex items-center justify-between rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 text-sm">
-                                        <span>成本分析（费用中心）</span>
-                                        <span class="switch-control">
-                                            <input type="checkbox" v-model="config.enable_billing">
-                                            <span class="switch-slider"></span>
-                                        </span>
-                                    </label>
                                 </div>
-                            </div>
+                            </section>
+
+                            <section v-if="currentSettingsTab === 'security'" class="settings-section">
+                                <header class="settings-section__head"><h3>登录安全</h3></header>
+                                <div class="settings-fields">
+                                    <div class="settings-field">
+                                        <label for="admin-password">管理员密码</label>
+                                        <input id="admin-password" v-model="config.admin_password" type="password" class="glass-input" autocomplete="new-password" placeholder="留空表示不修改，至少 6 位">
+                                    </div>
+                                    <div class="settings-subsection">
+                                        <div class="settings-passkey-row">
+                                            <div>
+                                                <h4>Passkey 快速登录</h4>
+                                                <p class="settings-hint">{{ passkeyCount > 0 ? `已设置 ${passkeyCount} 个 Passkey，可在登录页免输入密码。` : '使用设备指纹、面容或安全密钥登录。首次设置仍需先完成密码登录。' }}</p>
+                                            </div>
+                                            <button @click="registerPasskey" class="ghost-button" :disabled="passkeyBusy || !passkeySupported">{{ passkeyBusy ? '处理中...' : passkeyCount > 0 ? '添加 Passkey' : '设置 Passkey' }}</button>
+                                        </div>
+                                        <p v-if="!passkeySupported" class="settings-warning">{{ passkeySupportHint }}</p>
+                                        <label class="settings-toggle">
+                                            <span><span>允许密码登录</span><span class="settings-hint">{{ config.password_login_enabled ? '开启后可使用管理员密码登录。' : '已关闭，登录时只能使用 Passkey。' }}</span></span>
+                                            <span class="switch-control"><input type="checkbox" v-model="config.password_login_enabled" :disabled="passkeyCount === 0"><span class="switch-slider"></span></span>
+                                        </label>
+                                        <p v-if="passkeyCount === 0" class="settings-warning">请先注册至少一个 Passkey，才能关闭密码登录。</p>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section v-if="currentSettingsTab === 'backup'" class="settings-section">
+                                <header class="settings-section__head"><h3>备份恢复</h3></header>
+                                <div class="settings-fields">
+                                    <p class="settings-hint">账号、设置、流量历史和 Passkey 会打包为加密文件。备份密码不会保存在系统中，请务必妥善保管。</p>
+                                    <div class="two-col-grid">
+                                        <div class="settings-field">
+                                            <label for="backup-password">备份密码</label>
+                                            <input id="backup-password" v-model="backupPassword" type="password" class="glass-input" minlength="8" autocomplete="new-password" placeholder="至少 8 位">
+                                        </div>
+                                        <div class="settings-field">
+                                            <label for="backup-file">恢复文件</label>
+                                            <input id="backup-file" type="file" class="glass-input" accept=".ecsbkp,application/octet-stream" @change="backupFile = $event.target.files?.[0] || null">
+                                            <p v-if="backupFile" class="settings-hint">已选择：{{ backupFile.name }}</p>
+                                        </div>
+                                    </div>
+                                    <div class="settings-backup-actions">
+                                        <button @click="createBackup" class="ghost-button" :disabled="backupBusy">{{ backupBusy ? '处理中...' : '下载备份' }}</button>
+                                        <button @click="restoreBackup" class="danger-button" :disabled="backupBusy || !backupFile">恢复备份</button>
+                                    </div>
+                                    <p class="settings-warning">恢复会覆盖当前账号和设置，清除当前登录会话，并要求使用备份中的管理员凭据重新登录。</p>
+                                </div>
+                            </section>
 
                             <div v-if="currentSettingsTab === 'ddns'" class="metric-card">
                                 <div>
@@ -5658,7 +5790,7 @@
             </div>
         </div>
 
-        <div v-if="showAccountModal" class="account-modal-overlay">
+        <div v-if="showAccountModal" class="account-modal-overlay" :inert="showAccountTestModal || undefined" :aria-hidden="showAccountTestModal || undefined">
             <div class="glass-panel account-modal">
                 <div class="section-head">
                     <div>
@@ -5753,43 +5885,58 @@
                     </div>
                 </div>
 
-                <div v-if="accountDraftTestResult" class="test-result-card"
-                    :class="accountDraftTestResult.monitorStatus === 'warning' || !accountDraftTestResult.success ? 'warning' : 'success'">
-                    <div class="flex items-center justify-between gap-3">
-                        <div>
-                            <p class="test-result-title text-sm font-bold">账号测试结果</p>
-                            <p class="test-result-message mt-1 text-xs">{{ accountDraftTestResult.message }}</p>
-                        </div>
-                        <span class="test-result-badge"
-                            :class="{ warning: accountDraftTestResult.monitorStatus === 'warning' || !accountDraftTestResult.success }">
-                            {{ accountDraftTestResult.monitorStatus === 'warning' || !accountDraftTestResult.success ? '需处理' : '通过' }}
-                        </span>
-                    </div>
-                    <div class="test-result-line">
-                        <strong>ECS 接口</strong>
-                        <span>已接通</span>
-                    </div>
-                    <div class="test-result-line">
-                        <strong>云监控接口</strong>
-                        <span :class="{ 'warning-text': accountDraftTestResult.monitorStatus === 'warning' }">
-                            {{ accountDraftTestResult.monitorMessage || '未测试' }}
-                        </span>
-                    </div>
-                    <div class="test-result-line">
-                        <strong>当前区域实例数</strong>
-                        <span>{{ accountDraftTestResult.instanceCount ?? 0 }} 台</span>
-                    </div>
-                </div>
                 </div>
 
                 <div class="top-action-row" style="justify-content: flex-end; margin-top: 24px;">
                     <button @click="closeAccountModal" class="ghost-button">取消</button>
-                    <button @click="testAccountDraft" class="ghost-button" :disabled="testingAccountDraft || savingAccountModal">
+                    <button ref="accountTestTrigger" @click="testAccountDraft" class="ghost-button" :disabled="testingAccountDraft || savingAccountModal">
                         {{ testingAccountDraft ? '测试中...' : '测试账号' }}
                     </button>
                     <button @click="saveAccountModal" class="solid-button" :disabled="savingAccountModal">
                         {{ savingAccountModal ? '保存中...' : '保存账号' }}
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showAccountTestModal" class="account-modal-overlay account-test-overlay" @click.self="closeAccountTestModal">
+            <div ref="accountTestDialog" class="glass-panel account-modal account-test-modal" role="dialog" aria-modal="true"
+                aria-labelledby="account-test-title" :aria-busy="testingAccountDraft" @keydown.esc.stop.prevent="closeAccountTestModal" @keydown.tab="trapAccountTestFocus">
+                <div class="section-head">
+                    <div>
+                        <h2 id="account-test-title" class="section-title">账号权限检查</h2>
+                        <p class="account-test-meta">{{ accountTestContext.remark || '当前账号' }} · {{ accountTestContext.region }} · {{ accountTestContext.site }}</p>
+                    </div>
+                    <button ref="accountTestClose" @click="closeAccountTestModal" class="ghost-button compact-button">关闭</button>
+                </div>
+                <div class="account-test-body">
+                    <div class="account-test-summary" role="status" aria-live="polite">
+                        <div>
+                            <p>{{ testingAccountDraft ? '正在检查各项权限，请稍候…' : accountDraftTestResult?.message }}</p>
+                            <p v-if="accountDraftTestResult?.instanceCount != null" class="account-test-meta">当前区域实例数：{{ accountDraftTestResult.instanceCount }} 台</p>
+                        </div>
+                        <span class="permission-status" :class="accountDraftTestResult?.status || 'unchecked'">
+                            {{ testingAccountDraft ? '检查中' : accountTestStatusText(accountDraftTestResult?.status) }}
+                        </span>
+                    </div>
+                    <section v-for="group in accountTestGroups" :key="group.title" class="permission-group">
+                        <h3>{{ group.title }}</h3>
+                        <div v-for="check in group.checks" :key="check.id" class="permission-row">
+                            <div class="permission-row__header">
+                                <strong>{{ check.name }}</strong>
+                                <span class="permission-status" :class="check.status">{{ permissionStatusText(check.status) }}</span>
+                            </div>
+                            <p class="permission-message">{{ check.message }}<span v-if="check.errorCode">（{{ check.errorCode }}）</span></p>
+                            <a v-if="check.status !== 'ok' && check.policy" class="permission-policy"
+                                :href="'https://help.aliyun.com/zh/ram/developer-reference/' + encodeURIComponent(check.policy.toLowerCase())"
+                                target="_blank" rel="noopener noreferrer">{{ check.status === 'missing' ? '需要添加：' : '建议确认：' }}{{ check.policy }}</a>
+                        </div>
+                    </section>
+                    <p class="account-test-note">检查不会实际开关机、创建或释放资源。未验证的权限请在阿里云确认；本次结果仅针对当前区域和用于检查的实例。</p>
+                </div>
+                <div class="account-test-footer">
+                    <button v-if="!testingAccountDraft" @click="testAccountDraft" class="ghost-button">重新检查</button>
+                    <button @click="closeAccountTestModal" class="solid-button">{{ testingAccountDraft ? '取消检查' : '返回编辑' }}</button>
                 </div>
             </div>
         </div>
@@ -6609,12 +6756,13 @@
                 };
                 const savedNavigation = readNavigationState();
                 const validMenus = ['status', 'manage', 'accounts', 'settings', 'logs', 'about'];
-                const validSettingsTabs = ['global', 'ddns', 'notifications'];
+                const validSettingsTabs = ['protection', 'runtime', 'ddns', 'notifications', 'appearance', 'security', 'backup'];
+                const restoredSettingsTab = savedNavigation.settingsTab === 'global' ? 'protection' : savedNavigation.settingsTab;
                 const validNotifyTabs = ['telegram', 'email', 'webhook'];
                 const validLogTabs = ['action', 'heartbeat'];
                 const currentMenu = ref(validMenus.includes(savedNavigation.menu) ? savedNavigation.menu : 'status');
                 const mobileNavHidden = ref(false);
-                const currentSettingsTab = ref(validSettingsTabs.includes(savedNavigation.settingsTab) ? savedNavigation.settingsTab : 'global');
+                const currentSettingsTab = ref(validSettingsTabs.includes(restoredSettingsTab) ? restoredSettingsTab : 'protection');
                 const currentNotifyTab = ref(validNotifyTabs.includes(savedNavigation.notifyTab) ? savedNavigation.notifyTab : 'telegram');
                 const currentLogTab = ref(validLogTabs.includes(savedNavigation.logTab) ? savedNavigation.logTab : 'action');
                 const passkeySecureContext = typeof window !== 'undefined' && (
@@ -6744,6 +6892,41 @@
                 const savingAccountModal = ref(false);
                 const testingAccountDraft = ref(false);
                 const accountDraftTestResult = ref(null);
+                const showAccountTestModal = ref(false);
+                const accountTestContext = ref({ remark: '', region: '', site: '' });
+                const accountTestDialog = ref(null);
+                const accountTestClose = ref(null);
+                const accountTestTrigger = ref(null);
+                let accountTestController = null;
+                const accountTestGroups = computed(() => {
+                    const checks = Array.isArray(accountDraftTestResult.value?.checks) ? accountDraftTestResult.value.checks : [];
+                    return [
+                        { title: '基础功能', checks: checks.filter(check => check.required) },
+                        { title: '可选功能（不用时可忽略）', checks: checks.filter(check => !check.required) }
+                    ].filter(group => group.checks.length);
+                });
+                const permissionStatusText = (status) => ({ ok: '通过', missing: '缺少权限', unavailable: '检查失败', unchecked: '未验证' }[status] || '未验证');
+                const accountTestStatusText = (status) => ({ ok: '通过', missing: '需补权限', warning: '待确认', error: '检查失败' }[status] || '待确认');
+                const closeAccountTestModal = () => {
+                    const wasOpen = showAccountTestModal.value;
+                    accountTestController?.abort();
+                    accountTestController = null;
+                    testingAccountDraft.value = false;
+                    showAccountTestModal.value = false;
+                    if (wasOpen && showAccountModal.value) Vue.nextTick(() => accountTestTrigger.value?.focus());
+                };
+                const trapAccountTestFocus = (event) => {
+                    const elements = [...(accountTestDialog.value?.querySelectorAll('button:not(:disabled), a[href]') || [])];
+                    const first = elements[0];
+                    const last = elements[elements.length - 1];
+                    if (event.shiftKey && document.activeElement === first) {
+                        event.preventDefault();
+                        last?.focus();
+                    } else if (!event.shiftKey && document.activeElement === last) {
+                        event.preventDefault();
+                        first?.focus();
+                    }
+                };
                 const accountModalMode = ref('create');
                 const editingAccountIndex = ref(-1);
                 const accountDraft = ref(createDefaultAccount());
@@ -7270,9 +7453,17 @@
                 });
 
                 const settingsItems = [
-                    { key: 'global', label: '全局设置', description: '运行参数、阈值与费用' },
-                    { key: 'ddns', label: 'DDNS', description: '域名与公网 IP 同步' },
-                    { key: 'notifications', label: '通知中心', description: '邮件、Telegram、回调' }
+                    { key: 'protection', label: '流量保护', group: 'operations' },
+                    { key: 'runtime', label: '运行与费用', group: 'operations' },
+                    { key: 'ddns', label: '域名解析', group: 'operations' },
+                    { key: 'notifications', label: '通知中心', group: 'operations' },
+                    { key: 'appearance', label: '外观设置', group: 'maintenance' },
+                    { key: 'security', label: '登录安全', group: 'maintenance' },
+                    { key: 'backup', label: '备份恢复', group: 'maintenance' }
+                ];
+                const settingsGroups = [
+                    { key: 'operations', label: '实例与自动化', items: settingsItems.filter(item => item.group === 'operations') },
+                    { key: 'maintenance', label: '控制台维护', items: settingsItems.filter(item => item.group === 'maintenance') }
                 ];
 
                 const menuItems = computed(() => {
@@ -8075,7 +8266,11 @@
                         }
 
                         config.value.AppBrand.logo_url = data.url || '';
-                        markConfigClean();
+                        if (configBaseline.value) {
+                            const baseline = JSON.parse(configBaseline.value);
+                            baseline.AppBrand = { ...baseline.AppBrand, logo_url: config.value.AppBrand.logo_url };
+                            configBaseline.value = buildSettingsSnapshot(baseline);
+                        }
                         openAlert('Logo 已更新', 'success');
                     } catch (error) {
                         console.error('Upload logo failed', error);
@@ -8317,6 +8512,7 @@
                 };
 
                 const openCreateAccountModal = () => {
+                    closeAccountTestModal();
                     accountModalMode.value = 'create';
                     editingAccountIndex.value = -1;
                     accountDraft.value = createDefaultAccount();
@@ -8325,6 +8521,7 @@
                 };
 
                 const openEditAccountModal = (index) => {
+                    closeAccountTestModal();
                     accountModalMode.value = 'edit';
                     editingAccountIndex.value = index;
                     accountDraft.value = {
@@ -8337,8 +8534,8 @@
 
                 const closeAccountModal = () => {
                     showAccountModal.value = false;
+                    closeAccountTestModal();
                     savingAccountModal.value = false;
-                    testingAccountDraft.value = false;
                     accountDraftTestResult.value = null;
                     editingAccountIndex.value = -1;
                     accountDraft.value = createDefaultAccount();
@@ -8472,39 +8669,43 @@
                 };
 
                 const testAccountDraft = async () => {
-                    if (!validateAccountDraft()) return;
-                    testingAccountDraft.value = true;
+                    if (testingAccountDraft.value) return;
+                    const draft = { ...accountDraft.value };
+                    accountTestContext.value = {
+                        remark: draft.remark,
+                        region: aliyunRegions.find(region => region.id === draft.regionId)?.name || draft.regionId || '未选择区域',
+                        site: getSiteTypeLabel(draft.siteType)
+                    };
                     accountDraftTestResult.value = null;
+                    showAccountTestModal.value = true;
+                    Vue.nextTick(() => accountTestClose.value?.focus());
+                    if (!draft.AccessKeyId || !draft.AccessKeySecret || !draft.regionId) {
+                        accountDraftTestResult.value = { status: 'error', message: '请先填写 AK ID、AK Secret 并选择区域', checks: [] };
+                        return;
+                    }
+                    const controller = new AbortController();
+                    accountTestController = controller;
+                    testingAccountDraft.value = true;
                     try {
                         const res = await fetch('index.php?action=test_account', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ account: accountDraft.value })
+                            body: JSON.stringify({ account: draft }),
+                            signal: controller.signal
                         });
                         const data = await res.json();
-                        if (!res.ok || !data.success) {
-                            accountDraftTestResult.value = {
-                                success: false,
-                                message: data.message || '账号测试失败',
-                                monitorStatus: 'warning',
-                                monitorMessage: data.message || '账号测试失败'
-                            };
-                            openAlert(data.message || '账号测试失败', 'error');
-                            return;
-                        }
-                        accountDraftTestResult.value = data;
-                        openAlert(data.monitorStatus === 'warning' ? '账号测试完成，云监控权限待补充' : '账号测试通过', data.monitorStatus === 'warning' ? 'info' : 'success');
+                        if (accountTestController !== controller || controller.signal.aborted) return;
+                        accountDraftTestResult.value = res.ok && Array.isArray(data.checks)
+                            ? data
+                            : { status: 'error', message: data.message || '账号权限检查失败，请稍后重试', checks: [] };
                     } catch (error) {
-                        console.error('Test account failed', error);
-                        accountDraftTestResult.value = {
-                            success: false,
-                            message: '账号测试请求失败，请稍后重试',
-                            monitorStatus: 'warning',
-                            monitorMessage: '账号测试请求失败，请稍后重试'
-                        };
-                        openAlert('账号测试请求失败，请稍后重试', 'error');
+                        if (accountTestController !== controller || controller.signal.aborted) return;
+                        accountDraftTestResult.value = { status: 'error', message: '账号权限检查请求失败，请检查网络后重试', checks: [] };
                     } finally {
-                        testingAccountDraft.value = false;
+                        if (accountTestController === controller) {
+                            testingAccountDraft.value = false;
+                            accountTestController = null;
+                        }
                     }
                 };
 
@@ -9178,6 +9379,7 @@
                 });
 
                 onUnmounted(() => {
+                    accountTestController?.abort();
                     teardownMobileNavScroll();
                     stopLogPolling();
                     stopStatusPolling();
@@ -9218,6 +9420,16 @@
                     currentNotifyTab,
                     accountDraft,
                     accountDraftTestResult,
+                    showAccountTestModal,
+                    accountTestContext,
+                    accountTestDialog,
+                    accountTestClose,
+                    accountTestTrigger,
+                    accountTestGroups,
+                    permissionStatusText,
+                    accountTestStatusText,
+                    closeAccountTestModal,
+                    trapAccountTestFocus,
                     accountModalMode,
                     billingDetails,
                     billingHistoryDays,
@@ -9240,6 +9452,7 @@
                     logAutoRefresh,
                     menuItems,
                     settingsItems,
+                    settingsGroups,
                     settingsDirty,
                     passkeyAvailable,
                     passkeyCount,
