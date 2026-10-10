@@ -16,6 +16,18 @@
         return parsed == null ? '' : parsed.toLocaleString('zh-CN', { maximumFractionDigits: 6 });
     };
 
+    const amount = (value, currency = 'CNY', fixedDecimals = null) => {
+        const parsed = Number(value ?? 0);
+        if (!Number.isFinite(parsed)) return '--';
+        const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : `${currency} `;
+        const fixed = Number.isInteger(fixedDecimals);
+        const precision = fixed ? Math.min(20, Math.max(0, fixedDecimals)) : 6;
+        let formatted = parsed.toFixed(precision);
+        if (!fixed) formatted = formatted.replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
+        if (Number(formatted) === 0) formatted = fixed ? (0).toFixed(precision) : '0';
+        return `${symbol}${formatted}`;
+    };
+
     const codeKinds = new Map([
         ['imageos', 'imageos'],
         ['systemdisk', 'system-disk'], ['systemdisksize', 'system-disk'],
@@ -168,5 +180,5 @@
         return result;
     };
 
-    return { number, kind, itemLabels, usagePresentation, timeHours };
+    return { number, amount, kind, itemLabels, usagePresentation, timeHours };
 });

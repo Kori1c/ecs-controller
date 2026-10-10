@@ -7,6 +7,46 @@ const vm = require('node:vm');
 const path = require('node:path');
 const display = require('../static/billing-display.js');
 
+for (const [value, expected] of [
+    [0, '$0'], [0.002925, '$0.002925'], [0.009999, '$0.009999'],
+    [0.01, '$0.01'], [0.010001, '$0.010001'], [0.0117, '$0.0117'],
+    [0.013861, '$0.013861'], [0.016785, '$0.016785'], [0.025561, '$0.025561'],
+    [0.01234567, '$0.012346'], [1.2, '$1.2'], [10, '$10'], [100, '$100'],
+    [-0.0117, '$-0.0117'], [-0.0000001, '$0'], [1e30, '$1e+30']
+]) {
+    test(`billing amount uses uniform precision for ${value}`, () => assert.equal(display.amount(value, 'USD'), expected));
+}
+
+test('billing amounts preserve currency and explicit precision compatibility', () => {
+    assert.equal(display.amount(0.0117), '¥0.0117');
+    assert.equal(display.amount(0.0117, 'EUR'), 'EUR 0.0117');
+    assert.equal(display.amount(0.01, 'USD', 6), '$0.010000');
+    assert.equal(display.amount(10, 'USD', 0), '$10');
+    for (const value of [NaN, Infinity, -Infinity, 'invalid']) assert.equal(display.amount(value, 'USD'), '--');
+});
+
+test('display precision does not discard fees above one cent', () => {
+    const fees = [0.013861, 0.0117, 0];
+    const before = [...fees];
+    const formatted = fees.map(value => display.amount(value, 'USD'));
+    assert.deepEqual(formatted, ['$0.013861', '$0.0117', '$0']);
+    const shownTotal = formatted.reduce((sum, value) => sum + Number(value.slice(1)), 0);
+    assert.equal(display.amount(shownTotal, 'USD'), '$0.025561');
+    assert.equal(display.amount(fees.reduce((sum, value) => sum + value, 0), 'USD'), '$0.025561');
+    assert.deepEqual(fees, before);
+});
+
+test('detail rows, history and totals use the same shared formatter', () => {
+    const template = fs.readFileSync(path.join(__dirname, '../template.html'), 'utf8');
+    assert.match(template, /const formatBillingAmount = ECSBillingDisplay\.amount;/);
+    for (const expression of [
+        'formatBillingAmount(selectedBillingDay.total, billingDetails.currency)',
+        'formatBillingAmount(billingDetails.total, billingDetails.currency)',
+        'formatBillingAmount(day.total, billingDetails.currency)',
+        'formatBillingAmount(item.amount, item.currency || billingDetails.currency)'
+    ]) assert.ok(template.includes(expression), expression);
+});
+
 const cases = [
     ['云服务器配置', 'instance-configuration', '云服务器配置'],
     ['Cloud server configuration', 'instance-configuration', '云服务器配置'],

@@ -5950,7 +5950,7 @@
                             <button v-if="selectedBillingDate" @click="backToBillingHistory" class="billing-details-back">← 返回历史消费</button>
                             <h2 class="section-title">
                                 <template v-if="selectedBillingDate && selectedBillingDay">
-                                    {{ formatBillingDate(selectedBillingDate) }}<span class="billing-details-title__amount">消费金额：{{ formatBillingAmount(selectedBillingDay.total, billingDetails.currency, 6) }}</span>
+                                    {{ formatBillingDate(selectedBillingDate) }}<span class="billing-details-title__amount">消费金额：{{ formatBillingAmount(selectedBillingDay.total, billingDetails.currency) }}</span>
                                 </template>
                                 <template v-else>历史消费</template>
                             </h2>
@@ -5965,7 +5965,7 @@
                         <div v-if="!selectedBillingDate" class="billing-details-summary">
                             <div>
                                 <div class="billing-details-summary__label">近 {{ billingDetails.days }} 日消费</div>
-                                <div class="billing-details-summary__value">{{ formatBillingAmount(billingDetails.total, billingDetails.currency, 6) }}</div>
+                                <div class="billing-details-summary__value">{{ formatBillingAmount(billingDetails.total, billingDetails.currency) }}</div>
                             </div>
                             <div class="billing-details-summary__meta">
                                 <div>{{ billingDetails.from }} 至 {{ billingDetails.to }}</div>
@@ -5984,7 +5984,7 @@
                                 </div>
                                 <div class="billing-history-row__products" :title="day.productSummary">{{ day.productSummary }}</div>
                                 <div class="billing-history-row__count">{{ day.count }} 项</div>
-                                <div class="billing-history-row__amount">{{ formatBillingAmount(day.total, billingDetails.currency, 6) }}</div>
+                                <div class="billing-history-row__amount">{{ formatBillingAmount(day.total, billingDetails.currency) }}</div>
                                 <div class="billing-history-row__arrow">查看 →</div>
                             </button>
                         </div>
@@ -7084,24 +7084,7 @@
                     const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : `${currency} `;
                     return `${symbol}${amount.toFixed(2).replace(/\.00$/, '')}`;
                 };
-                const formatBillingAmount = (value, currency = 'CNY', fixedDecimals = null) => {
-                    const amount = Number(value ?? 0);
-                    if (!Number.isFinite(amount)) {
-                        return '--';
-                    }
-
-                    const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : `${currency} `;
-                    const precision = Number.isInteger(fixedDecimals)
-                        ? Math.max(0, fixedDecimals)
-                        : amount !== 0 && Math.abs(amount) < 0.01 ? 6 : 2;
-                    let formatted = amount.toFixed(precision);
-                    if (!Number.isInteger(fixedDecimals) && precision > 2) {
-                        formatted = formatted.replace(/0+$/, '').replace(/\.$/, '');
-                    } else if (!Number.isInteger(fixedDecimals)) {
-                        formatted = formatted.replace(/\.00$/, '');
-                    }
-                    return `${symbol}${formatted || '0'}`;
-                };
+                const formatBillingAmount = ECSBillingDisplay.amount;
                 const formatBillingDate = (value) => {
                     const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
                     return match ? `${match[1]}年${match[2]}月${match[3]}日` : (value || '未知日期');
