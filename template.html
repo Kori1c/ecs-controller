@@ -5954,7 +5954,7 @@
                                 </template>
                                 <template v-else>历史消费</template>
                             </h2>
-                            <p class="mt-1 text-sm text-slate-500">{{ billingDetails.title }} · 云端账单可能存在延迟</p>
+                            <p class="mt-1 text-sm text-slate-500">{{ billingDetails.title }} · 账号账单（不限当前实例或区域） · 云端账单可能存在延迟</p>
                         </div>
                     </div>
                     <button @click="closeBillingDetails" class="ghost-button compact-button">关闭</button>
@@ -6000,9 +6000,9 @@
                                 <tbody>
                                     <tr v-for="(item, index) in selectedBillingDay?.items || []" :key="`billing-detail-${selectedBillingDate}-${index}`" :style="{ '--billing-enter-delay': `${Math.min(index, 8) * 16}ms` }">
                                         <td>
-                                            <div class="billing-details-table__product">{{ item.product_name }}</div>
-                                            <div v-if="item.billing_item" class="billing-details-table__item">计费项目：{{ item.billing_item }}</div>
-                                            <div v-if="item.product_detail && item.product_detail !== item.product_name" class="billing-details-table__code">明细：{{ item.product_detail }}</div>
+                                            <div class="billing-details-table__product" :title="item.product_name || item.product_code">{{ billingItemLabels(item).product }}</div>
+                                            <div v-if="billingItemLabels(item).item" class="billing-details-table__item" :title="item.billing_item || item.billing_item_code">计费项目：{{ billingItemLabels(item).item }}</div>
+                                            <div v-if="billingItemLabels(item).detail && billingItemLabels(item).detail !== billingItemLabels(item).product" class="billing-details-table__code" :title="item.product_detail">明细：{{ billingItemLabels(item).detail }}</div>
                                             <div v-if="item.instance_id" class="billing-details-table__instance">账单资源：{{ item.instance_id }}</div>
                                         </td>
                                         <td class="billing-details-table__usage">
@@ -6264,6 +6264,7 @@
     </div>
 
     <script src="static/vue.global.prod.js?v=__ASSET_VERSION__"></script>
+    <script src="static/billing-display.js?v=__ASSET_VERSION__"></script>
     <script>
         // Keep legacy action URLs while attaching the Go backend's CSRF token.
         const nativeFetch = window.fetch.bind(window);
@@ -6965,10 +6966,10 @@
                         day.count += 1;
                         day.total += Number.isFinite(amount) ? amount : 0;
                         day.items.push(item);
-                        const productName = item.product_name || item.product_code || '其他费用';
-                        const product = item.billing_item
-                            ? `${productName} · ${item.billing_item}`
-                            : productName;
+                        const labels = billingItemLabels(item);
+                        const product = labels.item
+                            ? `${labels.product} · ${labels.item}`
+                            : labels.product;
                         if (!day.products.includes(product)) {
                             day.products.push(product);
                         }
@@ -7030,144 +7031,10 @@
 
                 const getSiteTypeLabel = (siteType) => siteType === 'international' ? '国际站' : '中国站';
                 const formatTrafficUsage = (value) => Number(value || 0).toFixed(2).replace(/\.00$/, '');
-                const formatBillingNumber = (value) => {
-                    const number = Number(value);
-                    if (!Number.isFinite(number)) return '';
-                    return number.toLocaleString('zh-CN', { maximumFractionDigits: 6 });
-                };
-                const formatBillingMetric = (item) => {
-                    const value = formatBillingNumber(item?.usage);
-                    if (!value) return '';
-                    return [value, item?.unit].filter(Boolean).join(' ');
-                };
-                const billingItemKind = (item) => {
-                    const text = [item?.product_name, item?.product_code, item?.product_detail, item?.billing_item, item?.billing_item_code]
-                        .filter(Boolean)
-                        .join(' ')
-                        .toLowerCase();
-                    if (text.includes('imageos')) return 'imageos';
-                    if (text.includes('系统盘') || text.includes('systemdisk')) return 'system-disk';
-                    if (text.includes('公网ip保有') || text.includes('eip保有') || (text.includes('弹性公网ip') && text.includes('保有'))) return 'eip-holding';
-                    if (text.includes('出方向流量') || text.includes('outbound traffic')) return 'traffic';
-                    if (text.includes('云服务器配置') || text.includes('instance configuration')) return 'instance-configuration';
-                    return 'generic';
-                };
-                const formatCurrentResourceStatus = (value) => {
-                    const status = String(value || '').trim();
-                    return status.toLowerCase() === 'in_use' ? 'InUse' : status;
-                };
-                const billingConfigPairs = (value) => String(value || '')
-                    .split(/[;；]/)
-                    .map((part) => {
-                        const separator = part.includes('：') ? '：' : ':';
-                        const index = part.indexOf(separator);
-                        return index > 0 ? {
-                            key: part.slice(0, index).trim(),
-                            value: part.slice(index + separator.length).trim()
-                        } : null;
-                    })
-                    .filter((part) => part?.key && part?.value && part.value !== '-');
-                const billingConfigValue = (pairs, ...keys) => {
-                    const pair = pairs.find((candidate) => keys.includes(candidate.key))
-                        || pairs.find((candidate) => keys.some((key) => candidate.key.includes(key)));
-                    return pair?.value || '';
-                };
-                const billingConfigSummary = (item, kind) => {
-                    const pairs = billingConfigPairs(item?.instance_config);
-                    if (pairs.length === 0 || kind === 'traffic') return '';
-
-                    if (kind === 'system-disk') {
-                        const size = billingConfigValue(pairs, '系统盘大小');
-                        const category = billingConfigValue(pairs, '系统盘种类');
-                        const parts = [size, category].filter(Boolean);
-                        return parts.length > 0 ? `账单配置：${parts.join(' · ')}` : '';
-                    }
-
-                    if (kind === 'instance-configuration' || kind === 'imageos') {
-                        const spec = billingConfigValue(pairs, '实例规格');
-                        const cpu = billingConfigValue(pairs, 'cpu核数');
-                        const memory = billingConfigValue(pairs, '内存');
-                        const os = billingConfigValue(pairs, '操作系统的类型', '操作系统详情');
-                        const compute = spec || [cpu, memory].filter(Boolean).join(' ');
-                        const parts = [compute, os].filter(Boolean);
-                        return parts.length > 0 ? `账单配置：${parts.join(' · ')}` : '';
-                    }
-
-                    if (kind === 'eip-holding') {
-                        const peakBandwidth = billingConfigValue(pairs, '带宽峰值');
-                        const lineType = billingConfigValue(pairs, '线路类型');
-                        const numericBandwidth = Number(peakBandwidth.replace(/[^\d.]/g, ''));
-                        const bandwidth = /kbps/i.test(peakBandwidth) && numericBandwidth >= 1024
-                            ? `${formatBillingNumber(numericBandwidth / 1024)} Mbps`
-                            : peakBandwidth;
-                        const parts = [bandwidth, lineType].filter(Boolean);
-                        return parts.length > 0 ? `账单配置：${parts.join(' · ')}` : '';
-                    }
-
-                    return '';
-                };
-                const billingUsagePresentation = (item) => {
-                    const usage = formatBillingMetric(item);
-                    const resource = item?.current_resource || {};
-                    const disk = resource.system_disk || null;
-                    const eip = resource.eip || null;
-                    const kind = billingItemKind(item);
-                    const config = billingConfigSummary(item, kind);
-
-                    if (kind === 'traffic') {
-                        return {
-                            primary: usage ? `实际出方向流量：${usage}` : '实际出方向流量未返回',
-                            current: '',
-                            billing: '',
-                            config
-                        };
-                    }
-
-                    if (kind === 'system-disk') {
-                        const current = disk?.category || disk?.status
-                            ? `当前配置：${[disk?.category, formatCurrentResourceStatus(disk?.status)].filter(Boolean).join(' · ')}`
-                            : '';
-                        return {
-                            primary: Number(disk?.size_gib) > 0 ? `系统盘 ${disk.size_gib} GiB` : '系统盘当前配置未返回',
-                            current,
-                            billing: usage ? `账单累计容量时长：${usage}·小时` : '账单累计容量时长未返回',
-                            config
-                        };
-                    }
-
-                    if (kind === 'eip-holding') {
-                        const servicePeriod = Number(item?.service_period_seconds);
-                        const hours = Number.isFinite(servicePeriod) && servicePeriod > 0
-                            ? formatBillingNumber(servicePeriod / 3600)
-                            : formatBillingNumber(item?.usage);
-                        const current = eip
-                            ? `当前配置：${[formatCurrentResourceStatus(eip.status), Number(eip.bandwidth_mbps) > 0 ? `${eip.bandwidth_mbps} Mbps` : ''].filter(Boolean).join(' · ')}`
-                            : '';
-                        return {
-                            primary: eip ? `${eip.count || 1} 个 EIP` : '公网 IP 保有服务',
-                            current,
-                            billing: hours ? `账单保有时长：${hours} 小时` : '账单保有时长未返回',
-                            config
-                        };
-                    }
-
-                    if (kind === 'instance-configuration' || kind === 'imageos') {
-                        const hours = formatBillingNumber(item?.usage);
-                        return {
-                            primary: hours ? `账单计费时长：${hours} 小时` : '账单计费时长未返回',
-                            current: '',
-                            billing: '此值用于账单计费，不代表实例实际运行时长。',
-                            config
-                        };
-                    }
-
-                    return {
-                        primary: usage ? `账单累计用量：${usage}` : '账单用量未返回',
-                        current: '',
-                        billing: usage ? '账单累计用量不等同于当前资源数量或容量。' : '',
-                        config
-                    };
-                };
+                const {
+                    itemLabels: billingItemLabels,
+                    usagePresentation: billingUsagePresentation
+                } = ECSBillingDisplay;
                 const formatTrafficValue = (value) => {
                     const traffic = Number(value || 0);
                     if (!Number.isFinite(traffic) || traffic <= 0) return '0 MB';
@@ -9504,6 +9371,7 @@
                     formatCurrencyValue,
                     formatBillingAmount,
                     billingUsagePresentation,
+                    billingItemLabels,
                     formatInstanceSpec,
                     formatPublicBandwidth,
                     formatPercent,

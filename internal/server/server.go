@@ -722,7 +722,15 @@ func decodeBillingDetails(value any) ([]cloud.BillingDetail, error) {
 
 func enrichBillingDetails(items []cloud.BillingDetail, resources map[string]cloud.BillingResource) {
 	for index := range items {
-		resource, ok := resources[items[index].InstanceID]
+		resourceID := strings.TrimSpace(items[index].InstanceID)
+		resource, ok := resources[resourceID]
+		if !ok {
+			// Billing IDs can append region and charging attributes to an EIP ID.
+			// Match only an already fetched resource; never alter the bill's ID.
+			if baseID, _, hasAttributes := strings.Cut(resourceID, ";"); hasAttributes {
+				resource, ok = resources[strings.TrimSpace(baseID)]
+			}
+		}
 		if !ok {
 			continue
 		}
