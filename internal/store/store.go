@@ -1179,8 +1179,11 @@ func (s *Store) RemoveAccountsOutsideGroups(groups []app.AccountGroup) ([]app.Ac
 	}
 	removed := make([]app.Account, 0)
 	for _, account := range accounts {
-		if account.InstanceStatus == "Releasing" {
-			// Let the existing cloud cleanup job finish before hiding the row.
+		var unfinished int
+		if err := s.DB.QueryRow(`SELECT COUNT(*) FROM jobs WHERE kind='delete_instance' AND entity_key=? AND status<>'done'`, strconv.FormatInt(account.ID, 10)).Scan(&unfinished); err != nil {
+			return removed, err
+		}
+		if account.InstanceStatus == "Releasing" || unfinished > 0 {
 			continue
 		}
 		key := account.GroupKey

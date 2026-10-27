@@ -1444,18 +1444,19 @@ func (s *Server) refreshAccount(w http.ResponseWriter, data map[string]any) {
 	if err != nil {
 		if cloud.IsNotFound(err) {
 			beforeAccounts, _ := s.Store.LoadAccounts(false)
-			if err := s.Store.DeleteInstanceData(a.ID); err != nil {
-				s.error(w, 500, "清理云端不存在实例失败: "+err.Error())
+			removed, cleanupErr := s.Store.PurgeCloudMissing(a.AccessKeyID, a.RegionID, a.InstanceID)
+			if cleanupErr != nil {
+				s.error(w, 500, "清理云端不存在实例失败: "+cleanupErr.Error())
 				return
 			}
-			if s.Store.GetSetting("ddns_enabled", "0") == "1" {
+			if removed && s.Store.GetSetting("ddns_enabled", "0") == "1" {
 				payload := map[string]any{"account": ddnsPayloadAccount(*a), "before": ddnsPayloadAccounts(beforeAccounts)}
 				if enqueueErr := s.Store.EnqueueJob(randomToken(16), "delete_ddns", strconv.FormatInt(a.ID, 10), payload); enqueueErr != nil {
 					s.Store.AddLog("warning", "云端实例已清理，但 DDNS 清理任务入队失败: "+enqueueErr.Error())
 				}
 				_ = s.Store.SetSetting("last_ddns_reconcile", "0")
 			}
-			s.Store.AddLog("info", "手动刷新确认云端实例不存在，已彻底清理本地记录")
+			s.Store.AddLog("info", "手动刷新确认云端实例不存在，已从列表移除；未完成的释放任务会继续保留")
 			s.error(w, 404, "云端实例不存在，已从面板移除")
 			return
 		}
@@ -1588,11 +1589,37 @@ func (s *Server) syncAllInstances(w http.ResponseWriter) {
 			failures = append(failures, group.GroupKey+": "+err.Error())
 		}
 	}
+	// Also sweep rows that no configured group covers, so a manual sync always
+	// ends with the same instance count as the Aliyun console.
+	s.purgeOrphanedInstances(groups, &failures)
 	if len(failures) > 0 {
 		s.error(w, 400, "部分账号组同步失败: "+strings.Join(failures, "; "))
 		return
 	}
 	s.status(w)
+}
+
+// purgeOrphanedInstances removes rows whose (access key, region) pair is no
+// longer part of any configured group and whose cloud instance is confirmed
+// gone. Errors are collected so one failing account cannot hide the others.
+func (s *Server) purgeOrphanedInstances(groups []app.AccountGroup, failures *[]string) {
+	orphans, err := inventory.OrphanGroups(s.Store, groups)
+	if err != nil {
+		*failures = append(*failures, "读取待清理实例失败: "+err.Error())
+		return
+	}
+	for _, group := range orphans {
+		client := s.Cloud
+		if s.CloudFactory != nil {
+			client = s.CloudFactory(app.Account{AccessKeyID: group.AccessKeyID, AccessKeySecret: group.AccessKeySecret, RegionID: group.RegionID, SiteType: group.SiteType})
+		}
+		if client == nil {
+			continue
+		}
+		if _, purgeErr := inventory.PurgeAbsent(rctx(), s.Store, group, client, time.Now(), s.Log.Printf); purgeErr != nil {
+			*failures = append(*failures, group.RegionID+": "+purgeErr.Error())
+		}
+	}
 }
 
 func (s *Server) syncGroup(groupKey string) (int, error) {

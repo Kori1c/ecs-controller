@@ -256,6 +256,49 @@ func (w *Worker) reconcileCloudInventory(ctx context.Context, now time.Time) {
 			w.Store.AddLog("info", fmt.Sprintf("云端实例自动对账完成 [%s/%s]：云端 %d 台，清理 %d 台，恢复 %d 台", group.Remark, group.RegionID, result.RemoteCount, result.Purged, result.Recovered))
 		}
 	}
+	w.purgeOrphanedRows(ctx, groups, now)
+}
+
+// purgeOrphanedRows cleans rows whose (account, region) pair is no longer
+// described by any configured group. Such a row is invisible to the per-group
+// inventory pass, so without this sweep it could keep showing an instance that
+// was deleted in the Aliyun console.
+func (w *Worker) purgeOrphanedRows(ctx context.Context, groups []app.AccountGroup, now time.Time) {
+	orphans, err := inventory.OrphanGroups(w.Store, groups)
+	if err != nil {
+		w.Store.AddLog("warning", "读取待清理实例失败: "+err.Error())
+		return
+	}
+	for _, group := range orphans {
+		key := group.AccessKeyID + "|" + group.RegionID
+		attemptKey := "inventory_orphan_attempt_" + key
+		lastAttempt, _ := strconv.ParseInt(w.Store.GetSetting(attemptKey, "0"), 10, 64)
+		if lastAttempt > 0 && now.Unix()-lastAttempt < int64(cloudInventoryInterval.Seconds()) {
+			continue
+		}
+		_ = w.Store.SetSetting(attemptKey, strconv.FormatInt(now.Unix(), 10))
+		client := w.Cloud
+		if w.CloudFactory != nil {
+			client = w.CloudFactory(group)
+		}
+		if client == nil {
+			continue
+		}
+		syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		var logf func(string, ...any)
+		if w.Log != nil {
+			logf = w.Log.Printf
+		}
+		purged, purgeErr := inventory.PurgeAbsent(syncCtx, w.Store, group, client, now, logf)
+		cancel()
+		if purgeErr != nil {
+			w.Store.AddLog("warning", fmt.Sprintf("清理账号组外的残留实例失败 [%s]: %v", group.RegionID, purgeErr))
+			continue
+		}
+		if purged > 0 {
+			w.Store.AddLog("info", fmt.Sprintf("已清理账号组配置之外的残留实例 %d 台 [%s]", purged, group.RegionID))
+		}
+	}
 }
 
 // cleanupMissingReleaseFailed removes a terminal local release failure after
@@ -266,7 +309,7 @@ func (w *Worker) cleanupMissingReleaseFailed(account app.Account, describeErr er
 	if account.InstanceStatus != "ReleaseFailed" || !cloud.IsNotFound(describeErr) {
 		return false, nil
 	}
-	removed, err := w.Store.PhysicallyDeleteReleaseFailed(account.ID)
+	removed, err := w.Store.PurgeCloudMissing(account.AccessKeyID, account.RegionID, account.InstanceID)
 	if err == nil && removed {
 		w.Store.AddLog("info", "已清理云端不存在的释放失败残留记录")
 	}
@@ -278,8 +321,12 @@ func (w *Worker) purgeMissingAccount(ctx context.Context, account app.Account) e
 	if err != nil {
 		return err
 	}
-	if err := w.Store.DeleteInstanceData(account.ID); err != nil {
+	removed, err := w.Store.PurgeCloudMissing(account.AccessKeyID, account.RegionID, account.InstanceID)
+	if err != nil {
 		return err
+	}
+	if !removed {
+		return nil
 	}
 	if w.ddnsEnabled() {
 		jobID := fmt.Sprintf("missing-ddns-%s-%d", account.InstanceID, time.Now().UnixNano())
@@ -664,7 +711,7 @@ func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
 	if err != nil {
 		return err
 	}
-	account, err := w.Store.Account(id, false)
+	account, err := w.Store.Account(id, true)
 	if err != nil {
 		return err
 	}
@@ -681,7 +728,7 @@ func (w *Worker) deleteInstance(ctx context.Context, job *store.Job) error {
 	beforeAccounts, _ := w.Store.LoadAccounts(false)
 	status := account.InstanceStatus
 	notFound := false
-	if status != "Stopped" && status != "Released" {
+	if account.CloudPresence == "missing" || (status != "Stopped" && status != "Released") {
 		instance, describeErr := client.DescribeInstance(ctx, account.RegionID, account.InstanceID)
 		if cloud.IsNotFound(describeErr) {
 			notFound = true

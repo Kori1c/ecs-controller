@@ -316,16 +316,34 @@ func (s *Service) DescribeInstances(ctx context.Context, region string) ([]Insta
 }
 
 func (s *Service) DescribeInstance(ctx context.Context, region, id string) (*Instance, error) {
-	result, err := s.ECS.Call(ctx, "DescribeInstances", map[string]string{"RegionId": region, "InstanceId.1": id})
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, fmt.Errorf("查询实例必须指定实例 ID")
+	}
+	ids, _ := json.Marshal([]string{id})
+	result, err := s.ECS.Call(ctx, "DescribeInstances", map[string]string{"RegionId": region, "InstanceIds": string(ids)})
 	if err != nil {
 		return nil, err
 	}
-	items := mapsAt(result, "Instances.Instance")
-	if len(items) == 0 {
+	container, ok := result["Instances"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("DescribeInstances 响应缺少实例列表，无法确认 %s", id)
+	}
+	items, ok := container["Instance"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("DescribeInstances 实例列表格式异常，无法确认 %s", id)
+	}
+	for _, raw := range items {
+		item, valid := raw.(map[string]any)
+		if valid && stringValue(item["InstanceId"]) == id {
+			v := instanceFromMap(item)
+			return &v, nil
+		}
+	}
+	if len(items) == 0 && intValue(result["TotalCount"]) == 0 {
 		return nil, &APIError{Code: "InvalidInstanceId.NotFound", Message: fmt.Sprintf("instance %s not found", id)}
 	}
-	v := instanceFromMap(items[0])
-	return &v, nil
+	return nil, fmt.Errorf("DescribeInstances 未返回目标实例 %s，响应无法用于确认实例不存在", id)
 }
 
 func (s *Service) DescribeInstancePublicNetworks(ctx context.Context, region string, instanceIDs []string) (map[string]InstancePublicNetwork, error) {
