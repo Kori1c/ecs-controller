@@ -1588,11 +1588,37 @@ func (s *Server) syncAllInstances(w http.ResponseWriter) {
 			failures = append(failures, group.GroupKey+": "+err.Error())
 		}
 	}
+	// Also sweep rows that no configured group covers, so a manual sync always
+	// ends with the same instance count as the Aliyun console.
+	s.purgeOrphanedInstances(groups, &failures)
 	if len(failures) > 0 {
 		s.error(w, 400, "部分账号组同步失败: "+strings.Join(failures, "; "))
 		return
 	}
 	s.status(w)
+}
+
+// purgeOrphanedInstances removes rows whose (access key, region) pair is no
+// longer part of any configured group and whose cloud instance is confirmed
+// gone. Errors are collected so one failing account cannot hide the others.
+func (s *Server) purgeOrphanedInstances(groups []app.AccountGroup, failures *[]string) {
+	orphans, err := inventory.OrphanGroups(s.Store, groups)
+	if err != nil {
+		*failures = append(*failures, "读取待清理实例失败: "+err.Error())
+		return
+	}
+	for _, group := range orphans {
+		client := s.Cloud
+		if s.CloudFactory != nil {
+			client = s.CloudFactory(app.Account{AccessKeyID: group.AccessKeyID, AccessKeySecret: group.AccessKeySecret, RegionID: group.RegionID, SiteType: group.SiteType})
+		}
+		if client == nil {
+			continue
+		}
+		if _, purgeErr := inventory.PurgeAbsent(rctx(), s.Store, group, client, time.Now(), s.Log.Printf); purgeErr != nil {
+			*failures = append(*failures, group.RegionID+": "+purgeErr.Error())
+		}
+	}
 }
 
 func (s *Server) syncGroup(groupKey string) (int, error) {

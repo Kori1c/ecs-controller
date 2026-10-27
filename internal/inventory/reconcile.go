@@ -54,7 +54,7 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 		result.RemoteCount++
 		var existing *app.Account
 		for i := range accounts {
-			if !sameGroup(accounts[i], group) || accounts[i].InstanceID != instance.ID {
+			if !ownedByGroup(accounts[i], group) || accounts[i].InstanceID != instance.ID {
 				continue
 			}
 			if existing == nil || accounts[i].IsDeleted == 0 {
@@ -66,6 +66,10 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 		}
 		if existing != nil {
 			if existing.InstanceStatus == "Releasing" {
+				// Never resurrect an in-flight release into a live status: doing
+				// so could let automation act on an instance that is being
+				// released. Rows whose instance is already gone are handled by
+				// the cloud-confirmed purge below.
 				continue
 			}
 			if existing.IsDeleted != 0 {
@@ -137,55 +141,20 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 
 	purgedKeys := make(map[string]struct{})
 	for _, account := range accounts {
-		if account.InstanceID == "" || remoteIDs[account.InstanceID] || !sameGroup(account, group) {
-			continue
-		}
-		if account.InstanceStatus == "Releasing" {
+		if account.InstanceID == "" || remoteIDs[account.InstanceID] || !ownedByGroup(account, group) {
 			continue
 		}
 		key := instanceKey(account)
 		if _, alreadyPurged := purgedKeys[key]; alreadyPurged {
 			continue
 		}
-		// A local release job still owns its row until EIP and DDNS cleanup
-		// completes. Let that job finish instead of orphaning its retry state.
-		hasReleasingDuplicate := false
-		for _, candidate := range accounts {
-			if sameInstance(candidate, account) && candidate.InstanceStatus == "Releasing" {
-				hasReleasingDuplicate = true
-				break
-			}
+		purged, purgeErr := purgeIfGone(ctx, st, account, group, client, accounts, now, logf)
+		if purgeErr != nil {
+			return result, purgeErr
 		}
-		if hasReleasingDuplicate {
-			continue
-		}
-		confirmedMissing, confirmErr := confirmMissing(ctx, client, group.RegionID, account.InstanceID)
-		if confirmErr != nil {
-			if logf != nil {
-				logf("二次确认云端实例失败（账号组 %s，实例 %s）: %v", group.GroupKey, account.InstanceID, confirmErr)
-			}
-			continue
-		}
-		if !confirmedMissing {
-			continue
-		}
-		purgedKeys[key] = struct{}{}
-		for _, candidate := range accounts {
-			if !sameInstance(candidate, account) {
-				continue
-			}
-			if err := st.DeleteInstanceData(candidate.ID); err != nil {
-				return result, err
-			}
-		}
-		result.Purged++
-		st.AddLog("info", "已彻底清理云端不存在的实例记录")
-		if st.GetSetting("ddns_enabled", "0") == "1" {
-			jobID := fmt.Sprintf("inventory-ddns-%s-%d", account.InstanceID, now.UnixNano())
-			payload := map[string]any{"account": ddnsPayloadAccount(account), "before": ddnsPayloadAccounts(accounts)}
-			if enqueueErr := st.EnqueueJob(jobID, "delete_ddns", strconv.FormatInt(account.ID, 10), payload); enqueueErr != nil {
-				st.AddLog("warning", "云端实例已清理，但 DDNS 清理任务入队失败: "+enqueueErr.Error())
-			}
+		if purged {
+			purgedKeys[key] = struct{}{}
+			result.Purged++
 		}
 	}
 
@@ -193,6 +162,126 @@ func SyncGroup(ctx context.Context, st *store.Store, group app.AccountGroup, cli
 		_ = st.SetSetting("last_ddns_reconcile", "0")
 	}
 	return result, nil
+}
+
+// OrphanGroups returns one synthetic group per (access key, region) pair that
+// still has local rows but is no longer described by the configured groups.
+// Those rows are invisible to the normal per-group inventory pass, so they need
+// a dedicated sweep.
+func OrphanGroups(st *store.Store, groups []app.AccountGroup) ([]app.AccountGroup, error) {
+	accounts, err := st.LoadAccounts(true)
+	if err != nil {
+		return nil, err
+	}
+	covered := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		covered[group.AccessKeyID+"|"+group.RegionID] = true
+	}
+	orphans := make(map[string]app.AccountGroup)
+	for _, account := range accounts {
+		if account.AccessKeyID == "" || account.RegionID == "" {
+			continue
+		}
+		key := account.AccessKeyID + "|" + account.RegionID
+		if covered[key] {
+			continue
+		}
+		if _, exists := orphans[key]; exists {
+			continue
+		}
+		orphans[key] = app.AccountGroup{
+			AccessKeyID: account.AccessKeyID, AccessKeySecret: account.AccessKeySecret,
+			RegionID: account.RegionID, SiteType: account.SiteType,
+		}
+	}
+	result := make([]app.AccountGroup, 0, len(orphans))
+	for _, group := range orphans {
+		result = append(result, group)
+	}
+	return result, nil
+}
+
+// PurgeAbsent removes local rows whose instance no longer exists in the cloud.
+// It is the fallback for rows that no configured group covers, for example
+// after a group was deleted or a region was dropped from settings, so the
+// panel cannot keep showing instances that are gone from Aliyun.
+func PurgeAbsent(ctx context.Context, st *store.Store, group app.AccountGroup, client cloud.Client, now time.Time, logf func(string, ...any)) (int, error) {
+	accounts, err := st.LoadAccounts(true)
+	if err != nil {
+		return 0, err
+	}
+	purged := 0
+	purgedKeys := make(map[string]struct{})
+	for _, account := range accounts {
+		// Only rows of the group's own cloud identity and region may be judged
+		// with this client. Another account's row in the same region must never
+		// be confirmed with the wrong access key.
+		if account.InstanceID == "" || account.RegionID != group.RegionID || account.AccessKeyID != group.AccessKeyID {
+			continue
+		}
+		key := instanceKey(account)
+		if _, alreadyPurged := purgedKeys[key]; alreadyPurged {
+			continue
+		}
+		removed, purgeErr := purgeIfGone(ctx, st, account, group, client, accounts, now, logf)
+		if purgeErr != nil {
+			return purged, purgeErr
+		}
+		if removed {
+			purgedKeys[key] = struct{}{}
+			purged++
+		}
+	}
+	return purged, nil
+}
+
+// purgeIfGone deletes every local row for one cloud instance once the cloud
+// confirms it is absent. It never purges while a release job still owns the
+// row, and it confirms in the row's own region so a live instance cannot be
+// removed because its region drifted away from the group.
+func purgeIfGone(ctx context.Context, st *store.Store, account app.Account, group app.AccountGroup, client cloud.Client, accounts []app.Account, now time.Time, logf func(string, ...any)) (bool, error) {
+	// A local release job still owns its row until EIP and DDNS cleanup
+	// completes. Only an actually active job may hold the row: a row left in
+	// "Releasing" by an interrupted job must not become permanent.
+	if releasing, jobErr := hasActiveReleaseJob(st, account); jobErr == nil && releasing {
+		return false, nil
+	} else if jobErr != nil && logf != nil {
+		logf("检查释放任务失败（实例 %s）: %v", account.InstanceID, jobErr)
+	}
+	// Confirm in the account's own region: a row whose region drifted must be
+	// verified where the instance actually lives, not in the group's region,
+	// otherwise a live instance could be purged by mistake.
+	confirmRegion := account.RegionID
+	if confirmRegion == "" {
+		confirmRegion = group.RegionID
+	}
+	confirmedMissing, confirmErr := confirmMissing(ctx, client, confirmRegion, account.InstanceID)
+	if confirmErr != nil {
+		if logf != nil {
+			logf("二次确认云端实例失败（账号组 %s，实例 %s）: %v", group.GroupKey, account.InstanceID, confirmErr)
+		}
+		return false, nil
+	}
+	if !confirmedMissing {
+		return false, nil
+	}
+	for _, candidate := range accounts {
+		if !sameInstance(candidate, account) {
+			continue
+		}
+		if err := st.DeleteInstanceData(candidate.ID); err != nil {
+			return false, err
+		}
+	}
+	st.AddLog("info", "已彻底清理云端不存在的实例记录: "+account.InstanceID)
+	if st.GetSetting("ddns_enabled", "0") == "1" {
+		jobID := fmt.Sprintf("inventory-ddns-%s-%d", account.InstanceID, now.UnixNano())
+		payload := map[string]any{"account": ddnsPayloadAccount(account), "before": ddnsPayloadAccounts(accounts)}
+		if enqueueErr := st.EnqueueJob(jobID, "delete_ddns", strconv.FormatInt(account.ID, 10), payload); enqueueErr != nil {
+			st.AddLog("warning", "云端实例已清理，但 DDNS 清理任务入队失败: "+enqueueErr.Error())
+		}
+	}
+	return true, nil
 }
 
 func sameInstance(left, right app.Account) bool {
@@ -233,6 +322,25 @@ func confirmMissing(ctx context.Context, client cloud.Client, region, instanceID
 func sameGroup(account app.Account, group app.AccountGroup) bool {
 	return (account.GroupKey != "" && group.GroupKey != "" && account.GroupKey == group.GroupKey) ||
 		(account.AccessKeyID != "" && account.AccessKeyID == group.AccessKeyID && account.RegionID == group.RegionID)
+}
+
+// ownedByGroup reports whether this group's cloud inventory is authoritative
+// for a local row. A row whose stored group key drifted (for example after an
+// account edit) still belongs to the same cloud identity, so the access key
+// decides. Rows belonging to other accounts are never considered.
+func ownedByGroup(account app.Account, group app.AccountGroup) bool {
+	if sameGroup(account, group) {
+		return true
+	}
+	return account.AccessKeyID != "" && group.AccessKeyID != "" && account.AccessKeyID == group.AccessKeyID
+}
+
+// hasActiveReleaseJob reports whether a release job is genuinely still working
+// on this row. Rows that merely look like they are releasing, because a
+// previous job died or was dropped, must stay eligible for cleanup once the
+// cloud confirms the instance is gone.
+func hasActiveReleaseJob(st *store.Store, account app.Account) (bool, error) {
+	return st.HasActiveJob("delete_instance", strconv.FormatInt(account.ID, 10))
 }
 
 func ddnsPayloadAccount(account app.Account) map[string]any {

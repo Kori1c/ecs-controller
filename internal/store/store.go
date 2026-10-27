@@ -840,6 +840,20 @@ func (s *Store) FailJob(jobID, message string) error {
 	return err
 }
 
+// HasActiveJob reports whether a job of the given kind is queued, waiting for a
+// retry, or genuinely running for this entity. A "running" row is only trusted
+// while its lease is fresh: after a crash the row is stale and must not block
+// cloud-confirmed cleanup forever.
+func (s *Store) HasActiveJob(kind, entityKey string) (bool, error) {
+	var count int
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM jobs WHERE kind=? AND entity_key=? AND (status IN ('queued','retry') OR (status='running' AND locked_at>=?))`,
+		kind, entityKey, time.Now().Add(-2*time.Minute).Unix()).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (s *Store) LoadAccounts(includeDeleted bool) ([]app.Account, error) {
 	where := "WHERE is_deleted = 0 AND COALESCE(cloud_presence,'present') <> 'missing'"
 	if includeDeleted {
@@ -1180,8 +1194,12 @@ func (s *Store) RemoveAccountsOutsideGroups(groups []app.AccountGroup) ([]app.Ac
 	removed := make([]app.Account, 0)
 	for _, account := range accounts {
 		if account.InstanceStatus == "Releasing" {
-			// Let the existing cloud cleanup job finish before hiding the row.
-			continue
+			// Only an actually active release job may hold this row back. A row
+			// left in "Releasing" by a dead job must not survive forever.
+			active, jobErr := s.HasActiveJob("delete_instance", strconv.FormatInt(account.ID, 10))
+			if jobErr != nil || active {
+				continue
+			}
 		}
 		key := account.GroupKey
 		if key == "" {
