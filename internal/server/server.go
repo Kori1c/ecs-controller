@@ -47,6 +47,7 @@ type Server struct {
 }
 
 func New(st *store.Store, dataDir, templatePath, setupToken string, client cloud.Client) *Server {
+	setupToken = strings.TrimSpace(setupToken)
 	if setupToken == "" {
 		setupToken = randomToken(24)
 		log.Printf("ECS_SETUP_TOKEN 未设置，本次初始化 token: %s", setupToken)
@@ -199,7 +200,7 @@ func (s *Server) setup(w http.ResponseWriter, r *http.Request) {
 		s.error(w, http.StatusForbidden, "系统已完成初始化")
 		return
 	}
-	if r.Header.Get("X-Setup-Token") != s.SetupToken {
+	if strings.TrimSpace(r.Header.Get("X-Setup-Token")) != s.SetupToken {
 		s.error(w, http.StatusForbidden, "初始化 token 无效")
 		return
 	}

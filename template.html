@@ -9180,7 +9180,7 @@
                     try {
                         const res = await fetch('index.php?action=setup', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-Setup-Token': setupData.value.setup_token },
+                            headers: { 'Content-Type': 'application/json', 'X-Setup-Token': setupData.value.setup_token.trim() },
                             body: JSON.stringify({
                                 ...createDefaultConfig(),
                                 ...setupData.value

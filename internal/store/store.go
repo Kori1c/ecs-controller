@@ -1265,10 +1265,17 @@ func (s *Store) SaveGroups(groups []app.AccountGroup) error {
 }
 
 func (s *Store) LoadGroups() ([]app.AccountGroup, error) {
-	raw := s.GetSetting("account_groups", "[]")
+	var raw string
+	err := s.DB.QueryRow(`SELECT value FROM settings WHERE key='account_groups'`).Scan(&raw)
+	legacy := errors.Is(err, sql.ErrNoRows)
+	if err != nil && !legacy {
+		return nil, err
+	}
 	var groups []app.AccountGroup
-	if err := json.Unmarshal([]byte(raw), &groups); err != nil {
-		groups = nil
+	if !legacy {
+		if err := json.Unmarshal([]byte(raw), &groups); err != nil {
+			return nil, fmt.Errorf("账号组配置格式无效: %w", err)
+		}
 	}
 	var secrets map[string]string
 	_ = json.Unmarshal([]byte(s.GetSetting("account_group_secrets", "{}")), &secrets)
@@ -1314,12 +1321,14 @@ func (s *Store) LoadGroups() ([]app.AccountGroup, error) {
 		groups[i].ScheduleBlockedByTraffic = groups[i].ScheduleBlockedByTraffic || blockedGroups[groups[i].GroupKey]
 	}
 	derived := false
-	if len(groups) == 0 && len(accounts) > 0 {
+	if legacy && len(accounts) > 0 {
 		groups = deriveGroupsFromAccounts(accounts)
 		derived = len(groups) > 0
 	}
 	if legacyPlaintext || derived {
-		_ = s.SaveGroups(groups)
+		if err := s.SaveGroups(groups); err != nil {
+			return nil, err
+		}
 	}
 	return groups, nil
 }

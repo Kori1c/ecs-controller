@@ -61,6 +61,18 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 generated_token=0
+# Preserve the current token when redeploying this same Compose project.
+# Do not copy credentials from an unrelated container with a matching name.
+if [[ -z "${ECS_SETUP_TOKEN:-}" ]]; then
+    existing_project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' ecs-controller 2>/dev/null || true)"
+    if [[ "$existing_project" == "$ECS_COMPOSE_PROJECT_NAME" ]]; then
+        existing_environment="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' ecs-controller 2>/dev/null || true)"
+        while IFS= read -r entry; do
+            case "$entry" in ECS_SETUP_TOKEN=*) ECS_SETUP_TOKEN="${entry#ECS_SETUP_TOKEN=}"; export ECS_SETUP_TOKEN; break ;; esac
+        done <<< "$existing_environment"
+        unset existing_environment entry
+    fi
+fi
 if [[ -z "${ECS_SETUP_TOKEN:-}" ]]; then
     if command -v openssl >/dev/null 2>&1; then
         ECS_SETUP_TOKEN="$(openssl rand -hex 16)"
@@ -122,5 +134,7 @@ if [[ "$generated_token" -eq 1 ]]; then
     echo "Setup token (only needed before initialization): $ECS_SETUP_TOKEN"
     echo "Save this token if initialization is not complete yet."
 else
-    echo "Using ECS_SETUP_TOKEN from the environment."
+    echo "Using the supplied or existing initialization token."
+    echo "Read it on this server with: docker exec ecs-controller printenv ECS_SETUP_TOKEN"
 fi
+echo "Already initialized? Log in with the administrator password; the setup token cannot reset it."

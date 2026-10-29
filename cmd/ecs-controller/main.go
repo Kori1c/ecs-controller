@@ -23,6 +23,15 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 	dataDir := env("ECS_DATA_DIR", "/var/lib/ecs-controller")
+	if len(os.Args) > 1 {
+		if len(os.Args) != 2 || os.Args[1] != "reset-password" {
+			log.Fatal("用法：ecs-controller reset-password（从标准输入读取新密码）")
+		}
+		if err := resetPassword(dataDir, os.Stdin, os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := os.MkdirAll(dataDir, 0700); err != nil {
 		log.Fatal(err)
 	}
