@@ -314,6 +314,31 @@ func (s *Server) authenticatedAction(w http.ResponseWriter, r *http.Request, act
 	case "get_update_status":
 		s.updateStatus(w)
 	case "save_config":
+		scope := stringValue(data["save_scope"])
+		delete(data, "save_scope")
+		if scope == "accounts" {
+			if len(data) != 1 {
+				s.error(w, 400, "账号保存不能包含系统设置")
+				return
+			}
+			warnings, err := s.saveAccounts(data)
+			if err != nil {
+				s.error(w, 400, err.Error())
+				return
+			}
+			s.json(w, 200, map[string]any{"success": true, "warnings": warnings})
+			return
+		}
+		if scope == "settings" {
+			if _, ok := data["Accounts"]; ok {
+				s.error(w, 400, "系统设置保存不能包含账号列表")
+				return
+			}
+		}
+		if scope != "" && scope != "settings" {
+			s.error(w, 400, "保存范围无效")
+			return
+		}
 		if err := s.saveConfig(data); err != nil {
 			s.error(w, 400, err.Error())
 		} else {
@@ -771,6 +796,12 @@ func trafficScope(status string) string {
 }
 
 func (s *Server) saveConfig(data map[string]any) error {
+	if len(data) == 1 {
+		if _, ok := data["Accounts"]; ok {
+			_, err := s.saveAccounts(data)
+			return err
+		}
+	}
 	if raw, ok := data["Accounts"].([]any); ok {
 		if err := validateAccountRegionUniqueness(raw); err != nil {
 			return err
@@ -822,7 +853,7 @@ func (s *Server) saveConfig(data map[string]any) error {
 		if cf, ok := ddns["cloudflare"].(map[string]any); ok {
 			_ = s.Store.SetSetting("ddns_cf_zone_id", stringValue(cf["zone_id"]))
 			_ = s.Store.SetSetting("ddns_cf_proxied", bool01(cf["proxied"]))
-			if err := s.saveSecret("ddns_cf_token", stringValue(cf["token"])); err != nil {
+			if err := s.saveSecretField("ddns_cf_token", cf, "token"); err != nil {
 				return err
 			}
 		}
@@ -833,7 +864,7 @@ func (s *Server) saveConfig(data map[string]any) error {
 				return err
 			}
 		}
-		if err := s.saveSecret("notify_password", stringValue(notify["password"])); err != nil {
+		if err := s.saveSecretField("notify_password", notify, "password"); err != nil {
 			return err
 		}
 		if tg, ok := notify["telegram"].(map[string]any); ok {
@@ -842,10 +873,10 @@ func (s *Server) saveConfig(data map[string]any) error {
 					return err
 				}
 			}
-			if err := s.saveSecret("notify_tg_token", stringValue(tg["token"])); err != nil {
+			if err := s.saveSecretField("notify_tg_token", tg, "token"); err != nil {
 				return err
 			}
-			if err := s.saveSecret("notify_tg_proxy_pass", stringValue(tg["proxy_pass"])); err != nil {
+			if err := s.saveSecretField("notify_tg_proxy_pass", tg, "proxy_pass"); err != nil {
 				return err
 			}
 		}
@@ -856,6 +887,23 @@ func (s *Server) saveConfig(data map[string]any) error {
 				}
 			}
 		}
+	}
+	if _, ok := data["Accounts"]; ok {
+		_, err := s.saveAccounts(data)
+		return err
+	}
+
+	return nil
+}
+
+func (s *Server) saveAccounts(data map[string]any) ([]string, error) {
+	var warnings []string
+	raw, ok := data["Accounts"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("账号列表格式无效")
+	}
+	if err := validateAccountRegionUniqueness(raw); err != nil {
+		return nil, err
 	}
 	if raw, ok := data["Accounts"].([]any); ok {
 		groups := make([]app.AccountGroup, 0, len(raw))
@@ -881,18 +929,18 @@ func (s *Server) saveConfig(data map[string]any) error {
 			}
 		}
 		if err := s.Store.SaveGroups(groups); err != nil {
-			return err
+			return warnings, err
 		}
 		// SaveGroups fills in derived keys and persists encrypted secrets on a
 		// copy, so reload the canonical groups before applying or syncing them.
 		groups, err := s.Store.LoadGroups()
 		if err != nil {
-			return err
+			return warnings, err
 		}
 		beforeAccounts, _ := s.Store.LoadAccounts(false)
 		removedAccounts, err := s.Store.RemoveAccountsOutsideGroups(groups)
 		if err != nil {
-			return err
+			return warnings, err
 		}
 		for _, account := range removedAccounts {
 			if s.Store.GetSetting("ddns_enabled", "0") != "1" {
@@ -907,16 +955,17 @@ func (s *Server) saveConfig(data map[string]any) error {
 		}
 		for _, group := range groups {
 			if err := s.Store.ApplyGroupSettings(group); err != nil {
-				return err
+				return warnings, err
 			}
 			if s.Cloud != nil || s.CloudFactory != nil {
 				if _, syncErr := s.syncGroup(group.GroupKey); syncErr != nil {
 					s.Store.AddLog("warning", "账号组同步失败: "+syncErr.Error())
+					warnings = append(warnings, "账号配置已保存，但部分实例同步未完成，请重试手动同步")
 				}
 			}
 		}
 	}
-	return nil
+	return warnings, nil
 }
 
 func validateAccountRegionUniqueness(raw []any) error {
@@ -1901,8 +1950,20 @@ func accountDisplay(account app.Account) string {
 	return account.AccessKeyID
 }
 
+func (s *Server) saveSecretField(key string, data map[string]any, field string) error {
+	value, present := data[field]
+	if !present {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("密钥字段格式无效")
+	}
+	return s.saveSecret(key, text)
+}
+
 func (s *Server) saveSecret(key, value string) error {
-	if value == "" || value == "********" {
+	if value == "********" {
 		return nil
 	}
 	sealed, err := s.Store.Seal(value)

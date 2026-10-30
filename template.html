@@ -5623,8 +5623,9 @@
                                             <span class="switch-slider"></span>
                                         </span>
 	                                    </label>
-	                                    <input v-model="config.Notification.telegram.token" class="glass-input" placeholder="机器人令牌">
-	                                    <input v-model="config.Notification.telegram.chat_id" class="glass-input" placeholder="接收会话编号">
+	                                    <input v-model="config.Notification.telegram.token" type="password" autocomplete="new-password" class="glass-input" placeholder="Bot Token">
+                                        <p class="settings-hint">星号表示已有 Token；保持星号可保留，删空后保存会清除已存 Token。</p>
+	                                    <input v-model="config.Notification.telegram.chat_id" class="glass-input" placeholder="User ID">
 	                                    <app-select
                                         v-model="config.Notification.telegram.proxy_type"
                                         class="glass-select"
@@ -8151,22 +8152,48 @@
                     return accessKeyID && regionID ? `${accessKeyID}|${regionID}` : '';
                 };
 
-                const persistConfig = async (successMessage = '配置已保存并完成实例同步') => {
-                    if (!validateAccounts()) return;
+                const persistConfig = async (successMessage = '系统设置已保存', scope = 'settings') => {
+                    if (scope === 'accounts' && !validateAccounts()) return;
+                    const payload = scope === 'accounts'
+                        ? { save_scope: 'accounts', Accounts: JSON.parse(JSON.stringify(config.value.Accounts)) }
+                        : { ...JSON.parse(buildSettingsSnapshot(config.value)), save_scope: 'settings' };
+                    const savedSettingsSnapshot = scope === 'settings' ? buildSettingsSnapshot(config.value) : null;
                     try {
                         const res = await fetch('index.php?action=save_config', {
                             method: 'POST',
-                            body: JSON.stringify(config.value)
+                            body: JSON.stringify(payload)
                         });
                         const data = await res.json();
-                        if (data.success) {
-                            await fetchConfig();
-                            markConfigClean();
-                            await fetchStatusData();
-                            if (isAdmin.value) {
-                                await fetchAllInstances(false);
+                        if (res.ok && data.success) {
+                            if (scope === 'accounts') {
+                                const settingsDraft = JSON.parse(buildSettingsSnapshot(config.value));
+                                const baseline = configBaseline.value;
+                                await fetchConfig();
+                                Object.assign(config.value, settingsDraft);
+                                configBaseline.value = baseline;
+                                await fetchStatusData();
+                                if (isAdmin.value) await fetchAllInstances(false);
+                            } else {
+                                const accepted = JSON.parse(savedSettingsSnapshot);
+                                const fields = [['Notification', 'password'], ['Notification', 'telegram', 'token'], ['Notification', 'telegram', 'proxy_pass'], ['Ddns', 'cloudflare', 'token']];
+                                for (const path of fields) {
+                                    const leaf = path[path.length - 1];
+                                    const oldParent = path.slice(0, -1).reduce((obj, key) => obj?.[key], accepted);
+                                    const currentParent = path.slice(0, -1).reduce((obj, key) => obj?.[key], config.value);
+                                    if (oldParent && typeof oldParent[leaf] === 'string') {
+                                        const submitted = oldParent[leaf];
+                                        const mask = submitted ? '********' : '';
+                                        oldParent[leaf] = mask;
+                                        if (currentParent?.[leaf] === submitted) currentParent[leaf] = mask;
+                                    }
+                                }
+                                if (config.value.admin_password === accepted.admin_password) config.value.admin_password = '';
+                                accepted.admin_password = '';
+                                configBaseline.value = buildSettingsSnapshot(accepted);
                             }
-                            if (successMessage) {
+                            if (Array.isArray(data.warnings) && data.warnings.length) {
+                                openAlert(data.warnings.join('；'), 'info');
+                            } else if (successMessage) {
                                 openAlert(successMessage, 'success');
                             }
                             return true;
@@ -8670,7 +8697,7 @@
 
                     const previousAccounts = config.value.Accounts;
                     config.value.Accounts = nextAccounts;
-                    const success = await persistConfig('账号已保存并完成实例同步');
+                    const success = await persistConfig('账号已保存并完成实例同步', 'accounts');
                     if (success) {
                         closeAccountModal();
                         return;
@@ -8920,7 +8947,7 @@
                     if (!confirmed) return;
                     const previousAccounts = [...config.value.Accounts];
                     config.value.Accounts.splice(index, 1);
-                    const success = await persistConfig('账号已删除并完成实例同步');
+                    const success = await persistConfig('账号已删除并完成实例同步', 'accounts');
                     if (!success) {
                         config.value.Accounts = previousAccounts;
                     }
