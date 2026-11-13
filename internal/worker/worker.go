@@ -126,15 +126,16 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 						continue
 					}
 					metadata := map[string]any{"health_status": "error", "traffic_api_status": "unknown", "traffic_api_message": describeErr.Error()}
-					if cloud.IsCredentialError(describeErr) {
-						metadata["protection_suspended"] = true
-						metadata["protection_suspend_reason"] = "credential_invalid"
-						if account.ProtectionNotifiedAt == 0 {
-							w.dispatchEvent(ctx, notify.Event{Title: "阿里云凭据异常", Summary: "已暂停自动停机保护", AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】阿里云凭据异常\n账号/实例: %s\n实例 ID: %s\n区域: %s\n错误: %s\n系统已暂停自动停机保护，请更新 AK 后恢复。", accountLabel(account), account.InstanceID, account.RegionID, describeErr.Error()), Fields: map[string]string{"instance_id": account.InstanceID, "reason": "credential_invalid"}})
-							account.ProtectionNotifiedAt = now.Unix()
-							metadata["protection_suspend_notified_at"] = account.ProtectionNotifiedAt
-						}
+					previousReason := account.ProtectionSuspendReason
+					account.ProtectionSuspended = true
+					account.ProtectionSuspendReason = protectionErrorReason(describeErr)
+					if account.ProtectionSuspendReason != previousReason || account.ProtectionSuspendReason == "traffic_api_error" {
+						account.ProtectionNotifiedAt = 0
 					}
+					w.notifyProtectionError(ctx, &account, describeErr, now)
+					metadata["protection_suspended"] = account.ProtectionSuspended
+					metadata["protection_suspend_reason"] = account.ProtectionSuspendReason
+					metadata["protection_suspend_notified_at"] = account.ProtectionNotifiedAt
 					_ = w.Store.UpdateAccountStatus(account.ID, account.TrafficUsed, account.InstanceStatus, now.Unix(), metadata)
 					continue
 				}
@@ -149,22 +150,7 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 				}
 				traffic, trafficStatus, trafficMessage, trafficErr := w.refreshTraffic(ctx, client, account, now)
 				if trafficErr != nil {
-					reason := "traffic_api_error"
-					if cloud.IsCredentialError(trafficErr) {
-						reason = "credential_invalid"
-					}
-					account.TrafficAPIStatus, account.TrafficAPIMessage = "error", trafficMessage
-					account.ProtectionSuspended, account.ProtectionSuspendReason = true, reason
-					account.UpdatedAt, account.TrafficBillingMonth = now.Unix(), now.Format("2006-01")
-					// CMS may be delayed or temporarily unavailable. A failed CMS
-					// request must not skip the independent CDT safety check.
-					if available := w.applyTrafficProtection(ctx, client, &account, now, threshold, thresholdAction, shutdownMode, account.TrafficUsed, false, keepAlive, monthlyAutoStart); available {
-						account.ProtectionSuspended, account.ProtectionSuspendReason = false, ""
-					}
-					if reason == "credential_invalid" && account.ProtectionNotifiedAt == 0 {
-						w.dispatchEvent(ctx, notify.Event{Title: "阿里云凭据异常", Summary: "已暂停自动停机保护", AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】阿里云凭据异常\n账号/实例: %s\n实例 ID: %s\n错误: %s\n系统已暂停自动停机保护，请更新 AK 后恢复。", accountLabel(account), account.InstanceID, trafficErr.Error()), Fields: map[string]string{"instance_id": account.InstanceID, "reason": "credential_invalid"}})
-						account.ProtectionNotifiedAt = now.Unix()
-					}
+					w.handleTrafficError(ctx, client, &account, now, threshold, thresholdAction, shutdownMode, trafficMessage, trafficErr, keepAlive, monthlyAutoStart)
 					if err := w.Store.UpsertAccount(account); err != nil {
 						w.Store.AddLog("error", "保存流量保护状态失败: "+err.Error())
 					}
@@ -177,33 +163,6 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 					account.ProtectionNotifiedAt = 0
 				}
 				_ = w.Store.AddTrafficHistory(account.ID, traffic, now)
-				if enableBilling && account.InstanceID != "" {
-					cycle := now.Format("2006-01")
-					if billingClient, ok := client.(cloud.BillingClient); ok {
-						if _, cacheOK := w.Store.GetBillingCache(account.ID, "balance", "", 6*time.Hour); !cacheOK {
-							if balance, currency, balanceErr := billingClient.GetAccountBalance(ctx, account.SiteType); balanceErr == nil {
-								_ = w.Store.SetBillingCache(account.ID, "balance", "", map[string]any{"balance": balance, "currency": currency})
-							} else {
-								_ = w.Store.SetBillingCache(account.ID, "balance", "", map[string]any{"error": balanceErr.Error()})
-							}
-						}
-						if _, cacheOK := w.Store.GetBillingCache(account.ID, "bill_overview", cycle, 6*time.Hour); !cacheOK {
-							if total, currency, overviewErr := billingClient.GetBillOverview(ctx, account.SiteType, cycle); overviewErr == nil {
-								_ = w.Store.SetBillingCache(account.ID, "bill_overview", cycle, map[string]any{"monthly_cost": total, "currency": currency})
-							} else {
-								_ = w.Store.SetBillingCache(account.ID, "bill_overview", cycle, map[string]any{"error": overviewErr.Error()})
-							}
-						}
-					}
-					if _, ok := w.Store.GetBillingCache(account.ID, "instance_bill", cycle, 6*time.Hour); !ok {
-						balance, monthlyCost, currency, billingErr := client.GetBilling(ctx, account.SiteType, account.InstanceID, cycle)
-						if billingErr != nil {
-							_ = w.Store.SetBillingCache(account.ID, "instance_bill", cycle, map[string]any{"error": billingErr.Error()})
-						} else {
-							_ = w.Store.SetBillingCache(account.ID, "instance_bill", cycle, map[string]any{"monthly_cost": monthlyCost, "balance": balance, "currency": currency})
-						}
-					}
-				}
 				w.applyTrafficProtection(ctx, client, &account, now, threshold, thresholdAction, shutdownMode, traffic, true, keepAlive, monthlyAutoStart)
 				if err := w.Store.UpsertAccount(account); err != nil {
 					w.Store.AddLog("error", "保存监控状态失败: "+err.Error())
@@ -212,6 +171,11 @@ func (w *Worker) Monitor(ctx context.Context, interval time.Duration) {
 					w.syncDDNSAccount(ctx, account)
 					w.dispatchEvent(ctx, notify.Event{Title: "公网 IP 已变化", Summary: fmt.Sprintf("%s 公网 IP 已从 %s 变为 %s", accountLabel(account), oldPublicIP, account.PublicIP), AccountID: accountLabel(account), Text: fmt.Sprintf("【ECS 控制台】公网 IP 已变化\n实例: %s\n实例 ID: %s\n旧 IP: %s\n新 IP: %s\n时间: %s", accountLabel(account), account.InstanceID, oldPublicIP, account.PublicIP, time.Now().Format("2006-01-02 15:04:05")), Fields: map[string]string{"old_ip": oldPublicIP, "new_ip": account.PublicIP, "instance_id": account.InstanceID}})
 				}
+			}
+			// Billing is independent of CMS/ECS refresh failures and runs after
+			// protection decisions so slow billing cannot delay this cycle's stops.
+			if enableBilling {
+				w.refreshBillingAccounts(ctx, accounts, now)
 			}
 			w.runDailyTrafficSummary(ctx, now)
 		}

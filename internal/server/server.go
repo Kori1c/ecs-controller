@@ -518,8 +518,11 @@ func (s *Server) config(w http.ResponseWriter) {
 			billing = map[string]any{"monthly_cost": nil, "balance": nil, "currency": map[bool]string{true: "USD", false: "CNY"}[g.SiteType == "international"], "last_updated": nil}
 		}
 		billing["enabled"] = settings["enable_billing"] == "1"
-		if trafficStatus == "error" {
-			billing["error"] = "流量接口异常，费用数据可能延迟"
+		if billing["currency"] == nil || billing["currency"] == "" {
+			billing["currency"] = map[bool]string{true: "USD", false: "CNY"}[g.SiteType == "international"]
+		}
+		if billing["enabled"] == true && (billing["monthly_cost"] == nil || billing["balance"] == nil) {
+			billing["error"] = "部分费用数据暂未获取或已过期，后台将自动重试"
 		}
 		usagePercent := 0.0
 		if g.MaxTraffic > 0 {

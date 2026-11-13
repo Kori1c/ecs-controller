@@ -5242,7 +5242,7 @@
                                     </div>
                                     <div class="summary-cell center-column">
                                         <div class="account-billing">
-                                            <template v-if="acc.billing && acc.billing.enabled && !acc.billing.error">
+                                            <template v-if="acc.billing && acc.billing.enabled">
                                                 <div class="account-billing__line">
                                                     本月消费
                                                     <span class="account-billing__value">{{ formatCurrencyValue(acc.billing.monthly_cost, acc.billing.currency) }}</span>
@@ -5251,6 +5251,7 @@
                                                     账户余额
                                                     <span class="account-billing__value">{{ formatCurrencyValue(acc.billing.balance, acc.billing.currency) }}</span>
                                                 </div>
+                                                <div v-if="acc.billing.error" class="account-billing__error">{{ acc.billing.error }}</div>
                                                 <div v-if="acc.billing.last_updated" class="account-billing__hint">{{ acc.billing.last_updated }} 更新</div>
                                                 <button @click.stop="openBillingDetails(acc)" class="account-billing__details-button">历史消费</button>
                                             </template>
@@ -5310,11 +5311,12 @@
                                             :style="{ width: Math.min(acc.usagePercent || 0, 100) + '%' }"></div>
                                     </div>
                                     <div v-if="hasTrafficIssue(acc)" class="text-xs text-[#dc2626]">{{ trafficIssueText(acc) }}</div>
-                                    <div v-if="acc.billing && acc.billing.enabled && !acc.billing.error">
+                                    <div v-if="acc.billing && acc.billing.enabled">
                                         <div class="account-card-grid__metric">
                                             <span class="account-card-grid__label">消费情况</span>
                                             <strong class="account-card-grid__value">本月 {{ formatCurrencyValue(acc.billing.monthly_cost, acc.billing.currency) }} · 余额 {{ formatCurrencyValue(acc.billing.balance, acc.billing.currency) }}</strong>
                                         </div>
+                                        <div v-if="acc.billing.error" class="account-billing__error">{{ acc.billing.error }}</div>
                                         <button @click="openBillingDetails(acc)" class="account-billing__details-button" style="margin-top: 8px;">查看历史消费</button>
                                     </div>
                                     <div v-else-if="acc.billing && acc.billing.error" class="account-billing__error">{{ acc.billing.error }}</div>
@@ -7267,13 +7269,8 @@
                     return '流量同步失败';
                 };
                 const formatCurrencyValue = (value, currency = 'CNY') => {
-                    const amount = Number(value ?? 0);
-                    if (!Number.isFinite(amount)) {
-                        return '--';
-                    }
-
-                    const symbol = currency === 'USD' ? '$' : currency === 'CNY' ? '¥' : `${currency} `;
-                    return `${symbol}${amount.toFixed(2).replace(/\.00$/, '')}`;
+                    if (value == null || typeof value === 'boolean' || (typeof value === 'string' && !value.trim())) return '--';
+                    return ECSBillingDisplay.amount(value, currency);
                 };
                 const formatBillingAmount = ECSBillingDisplay.amount;
                 const formatBillingDate = (value) => {
